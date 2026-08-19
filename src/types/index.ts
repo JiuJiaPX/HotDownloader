@@ -33,6 +33,7 @@ export interface Settings {
     safFolderUri?: string
     safFolderName?: string
     writeMetadata: boolean
+    downloadLrc: boolean
 }
 
 /** 歌曲可用的单个品质项 */
@@ -155,6 +156,7 @@ export const DEFAULT_SETTINGS: Settings = {
     maxConcurrent: 3,
     jumpToTask: true,
     writeMetadata: false,
+    downloadLrc: false,
 }
 
 // GitHub 最新 release 信息

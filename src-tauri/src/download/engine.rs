@@ -22,6 +22,8 @@ pub struct TaskController {
     pub delete_file_on_cancel: Arc<AtomicBool>,
     /// 下载线程确定的最终文件路径（供外部删除使用）
     pub final_path: Arc<Mutex<Option<String>>>,
+    /// 下载线程确定的最终 LRC 文件路径（供外部删除使用）
+    pub lrc_final_path: Arc<Mutex<Option<String>>>,
     /// 任务是否已由调度器启动
     pub started: Arc<AtomicBool>,
     /// 任务完成或退出的通知（用于 remove 等待）
@@ -39,6 +41,8 @@ pub struct DownloadEngine {
     task_contexts: Arc<Mutex<HashMap<String, TaskContext>>>,
     /// 存储任务最终文件路径（普通路径或 SAF URI），用于删除文件
     final_paths: Arc<Mutex<HashMap<String, String>>>,
+    /// 存储任务对应的 LRC 歌词文件路径/URI，用于删除时一并清理
+    lrc_paths: Arc<Mutex<HashMap<String, String>>>,
     /// 保护任务启动与移除的互斥锁，避免竞态
     start_lock: Arc<Mutex<()>>,
 }
@@ -54,6 +58,7 @@ impl DownloadEngine {
             scheduler_notify: Arc::new(Notify::new()),
             task_contexts: Arc::new(Mutex::new(HashMap::new())),
             final_paths: Arc::new(Mutex::new(HashMap::new())),
+            lrc_paths: Arc::new(Mutex::new(HashMap::new())),
             start_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -82,6 +87,7 @@ impl DownloadEngine {
             url_ready: Arc::new(Notify::new()),
             delete_file_on_cancel: Arc::new(AtomicBool::new(false)),
             final_path: Arc::new(Mutex::new(None)),
+            lrc_final_path: Arc::new(Mutex::new(None)),
             started: Arc::new(AtomicBool::new(false)),
             done: Arc::new(Notify::new()),
         };
@@ -146,6 +152,7 @@ impl DownloadEngine {
             url_ready: Arc::new(Notify::new()),
             delete_file_on_cancel: Arc::new(AtomicBool::new(false)),
             final_path: ctx.final_path.clone(), // 共享同一个 final_path
+            lrc_final_path: Arc::new(Mutex::new(None)),
             started: Arc::new(AtomicBool::new(false)),
             done: Arc::new(Notify::new()),
         };
@@ -278,6 +285,11 @@ impl DownloadEngine {
                         if let Some(p) = final_path {
                             engine.final_paths.lock().await.insert(task_id.clone(), p);
                         }
+                        // 保存 LRC 歌词文件路径（若存在）
+                        let lrc_path = ctrl_clone.lrc_final_path.lock().await.clone();
+                        if let Some(lp) = lrc_path {
+                            engine.lrc_paths.lock().await.insert(task_id.clone(), lp);
+                        }
 
                         // 通知任务完成（供 remove 等待）
                         ctrl_clone.done.notify_one();
@@ -294,6 +306,27 @@ impl DownloadEngine {
             }
 
             self.scheduler_notify.notified().await;
+        }
+    }
+
+    /// 删除单个文件路径/URI。SAF 与普通文件统一处理。
+    /// `NotFound` 视为删除成功。
+    async fn delete_file_path(&self, path: &str) -> Result<(), String> {
+        // 判断是否为 SAF URI
+        if path.starts_with("content://") || path.starts_with("saf://") {
+            // SAF 模式：使用插件 API 删除
+            let fs_uri = FsUri::from_uri(path.to_string());
+            let api = self.app_handle.android_fs();
+            api.remove_file(&fs_uri)
+                .map_err(|e| format!("删除 SAF 文件失败: {}", e))
+        } else {
+            // 普通模式：使用标准库删除
+            match tokio::fs::remove_file(path).await {
+                Ok(()) => Ok(()),
+                // 文件不存在视为删除成功，避免误报错误
+                Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("删除文件失败: {}", e)),
+            }
         }
     }
 
@@ -358,44 +391,30 @@ impl DownloadEngine {
 
         // 6. 删除文件（如果要求）
         if delete_file {
-            if let Some(path) = final_path {
-                // 判断是否为 SAF URI
-                if path.starts_with("content://") || path.starts_with("saf://") {
-                    // SAF 模式：使用插件 API 删除
-                    let fs_uri = FsUri::from_uri(path);
-                    let api = self.app_handle.android_fs();
-                    match api.remove_file(&fs_uri) {
-                        Ok(()) => {
-                            log::info!("已删除 SAF 文件: {}", fs_uri.uri);
-                        }
-                        Err(e) => {
-                            log::error!("删除 SAF 文件失败 {}: {}", fs_uri.uri, e);
-                            // 清理映射与上下文
-                            self.final_paths.lock().await.remove(task_id);
-                            self.task_contexts.lock().await.remove(task_id);
-                            return Err(format!("删除 SAF 文件失败: {}", e));
-                        }
-                    }
+            if let Some(path) = &final_path {
+                if let Err(e) = self.delete_file_path(path).await {
+                    log::error!("删除文件失败 {}: {}", path, e);
+                    self.final_paths.lock().await.remove(task_id);
+                    self.task_contexts.lock().await.remove(task_id);
+                    return Err(e);
+                }
+                log::info!("已删除文件: {}", path);
+            }
+        }
+
+        // 删除对应的 LRC 歌词文件（如果存在且要求删除文件）
+        if delete_file {
+            if let Some(lrc) = self.lrc_paths.lock().await.remove(task_id) {
+                if let Err(e) = self.delete_file_path(&lrc).await {
+                    // LRC 删除失败不阻塞主流程，仅记录日志
+                    log::warn!("删除 LRC 文件失败 {}: {}", lrc, e);
                 } else {
-                    // 普通模式：使用标准库删除
-                    match fs::remove_file(&path) {
-                        Ok(()) => {
-                            log::info!("已删除文件: {}", path);
-                        }
-                        Err(e) => {
-                            // 文件不存在视为删除成功，避免误报错误
-                            if e.kind() == ErrorKind::NotFound {
-                                log::warn!("文件不存在，无需删除: {}", path);
-                            } else {
-                                log::error!("删除文件失败 {}: {}", path, e);
-                                self.final_paths.lock().await.remove(task_id);
-                                self.task_contexts.lock().await.remove(task_id);
-                                return Err(format!("删除文件失败: {}", e));
-                            }
-                        }
-                    }
+                    log::info!("已删除 LRC 文件: {}", lrc);
                 }
             }
+        } else {
+            // 不删除文件时，也需要清理 LRC 路径映射，避免残留
+            self.lrc_paths.lock().await.remove(task_id);
         }
 
         // 7. 清除 final_paths 和 task_contexts

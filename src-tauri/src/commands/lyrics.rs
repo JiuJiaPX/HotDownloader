@@ -13,7 +13,7 @@ static LYRIC_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("Failed to build lyric HTTP client")
 });
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LyricResponse {
     /// Plain LRC lyrics (merged words).
     pub lrc: Option<String>,

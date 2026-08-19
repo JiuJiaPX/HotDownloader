@@ -21,6 +21,7 @@ use tokio::sync::Mutex;
 use super::engine::TaskController;
 use super::progress;
 use crate::commands::api::{self}; // 获取下载链接
+use crate::commands::lyrics::{self, LyricResponse};
 use crate::utils::{crypto, filename};
 
 /// 文件写入缓冲区容量（64 KB）
@@ -105,29 +106,23 @@ fn is_retryable_network_error(err: &reqwest::Error) -> bool {
 /// 所有错误仅记录日志，不阻止下载完成事件的发送
 async fn write_metadata(
     app_handle: &AppHandle,
-    song_id: u64,
     file_path: &str,
     is_saf: bool,
     saf_file_uri: Option<String>,
     cover_url: &str,
+    lyric: Option<LyricResponse>,
 ) {
-    // 1. 获取歌词：优先逐字歌词，其次普通歌词
-    let lyric_text = match crate::commands::lyrics::get_lyric_by_id(song_id).await {
-        Ok(resp) => {
-            // 优先级：逐字歌词（elrc） → 普通歌词（lrc）
-            if let Some(elrc) = resp.elrc.filter(|s| !s.trim().is_empty()) {
-                Some(elrc)
-            } else if let Some(lrc) = resp.lrc.filter(|s| !s.trim().is_empty()) {
-                Some(lrc)
-            } else {
-                None
-            }
-        }
-        Err(e) => {
-            log::warn!("获取歌词失败: {}", e);
+    // 1. 从已获取的歌词响应中提取歌词内容：优先逐字歌词（elrc），其次普通歌词（lrc）
+    let lyric_text = lyric.and_then(|resp| {
+        // 优先级：逐字歌词（elrc） → 普通歌词（lrc）
+        if let Some(elrc) = resp.elrc.filter(|s| !s.trim().is_empty()) {
+            Some(elrc)
+        } else if let Some(lrc) = resp.lrc.filter(|s| !s.trim().is_empty()) {
+            Some(lrc)
+        } else {
             None
         }
-    };
+    });
 
     // 2. 下载封面图片字节
     let cover_bytes = if !cover_url.is_empty() {
@@ -288,6 +283,109 @@ async fn write_metadata(
     }
 }
 
+/// 将普通 LRC 歌词写入与歌曲同名的 `.lrc` 文件。
+/// 支持普通模式与 SAF 模式，所有错误仅记录日志，不阻塞主下载流程。
+async fn write_lrc_file(
+    app_handle: &AppHandle,
+    lrc_content: &str,
+    song_file_path: &str,
+    is_saf: bool,
+    saf_folder_uri: Option<String>,
+) -> Option<String> {
+    // 提取歌曲文件名的 stem（不含扩展名）
+    let song_name = Path::new(song_file_path);
+    let stem = song_name
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+
+    if !is_saf {
+        // 普通模式：与歌曲文件同目录，生成 .lrc 文件
+        let parent = song_name.parent().unwrap_or_else(|| Path::new("."));
+        let lrc_path = parent.join(format!("{}.lrc", stem));
+        if let Err(e) = fs::write(&lrc_path, lrc_content) {
+            log::warn!("写入 LRC 歌词文件失败 {}: {}", lrc_path.display(), e);
+            return None;
+        } else {
+            log::info!("LRC 歌词文件已保存: {}", lrc_path.display());
+            return Some(lrc_path.to_string_lossy().to_string());
+        }
+    }
+
+    // SAF 模式：在已授权的 SAF 目录中创建同名 .lrc 文件
+    let parent_uri = match saf_folder_uri.as_deref() {
+        Some(s) => match FsUri::from_json_str(s) {
+            Ok(uri) => uri,
+            Err(e) => {
+                log::warn!("解析 SAF 文件夹 URI 失败: {}", e);
+                return None;
+            }
+        },
+        None => {
+            log::warn!("SAF 文件夹 URI 缺失，无法创建 LRC 文件");
+            return None;
+        }
+    };
+
+    let lrc_file_name = format!("{}.lrc", stem);
+    let api = app_handle.android_fs();
+
+    // 尝试解析已存在的 LRC 文件，若存在则打开可写并清空；否则创建新文件
+    let file_path = std::path::Path::new(&lrc_file_name);
+    let file_uri_opt = api.resolve_file_uri(&parent_uri, file_path).ok();
+
+    match file_uri_opt {
+        Some(existing_uri) => {
+            // 文件已存在：打开并清空后写入
+            match api.open_file(&existing_uri, FileAccessMode::ReadWrite) {
+                Ok(mut f) => {
+                    if let Err(e) = f.set_len(0) {
+                        log::warn!("清空 LRC 文件失败: {}", e);
+                        return None;
+                    }
+                    if let Err(e) = f.seek(std::io::SeekFrom::Start(0)) {
+                        log::warn!("LRC 文件 seek 失败: {}", e);
+                        return None;
+                    }
+                    if let Err(e) = f.write_all(lrc_content.as_bytes()) {
+                        log::warn!("写入 LRC 歌词内容失败: {}", e);
+                        return None;
+                    }
+                    log::info!("SAF LRC 歌词文件已保存: {}", existing_uri.uri);
+                    return Some(existing_uri.uri.clone());
+                }
+                Err(e) => {
+                    log::warn!("打开已有 LRC 文件失败: {}", e);
+                    return None;
+                }
+            }
+        }
+        None => {
+            // 文件不存在：创建新文件
+            match api.create_new_file(&parent_uri, file_path, None) {
+                Ok(new_uri) => match api.open_file_writable(&new_uri) {
+                    Ok(mut f) => {
+                        if let Err(e) = f.write_all(lrc_content.as_bytes()) {
+                            log::warn!("写入 LRC 歌词内容失败: {}", e);
+                            return None;
+                        }
+                        log::info!("SAF LRC 歌词文件已保存: {}", new_uri.uri);
+                        return Some(new_uri.uri.clone());
+                    }
+                    Err(e) => {
+                        log::warn!("打开新 LRC 文件失败: {}", e);
+                        return None;
+                    }
+                },
+                Err(e) => {
+                    log::warn!("创建 LRC 文件失败: {}", e);
+                    return None;
+                }
+            }
+        }
+    }
+}
+
 /// 等待暂停恢复，返回 true 表示任务已被取消，应退出下载循环
 async fn wait_for_resume_async(controller: &TaskController) -> bool {
     loop {
@@ -304,8 +402,13 @@ async fn wait_for_resume_async(controller: &TaskController) -> bool {
 /// 实际执行下载的函数
 pub async fn download_task(ctx: TaskContext, controller: TaskController, app_handle: AppHandle) {
     // 获取设置并增加 writeMetadata
-    let (dir_setting, template_setting, saf_uri_setting, write_metadata_enabled) =
-        get_download_settings(&app_handle).await;
+    let (
+        dir_setting,
+        template_setting,
+        saf_uri_setting,
+        write_metadata_enabled,
+        download_lrc_enabled,
+    ) = get_download_settings(&app_handle).await;
     // 1. 构建最终保存路径（只需一次）
     let (is_saf, download_dir, saf_folder_uri) = {
         if !ctx.save_path.is_empty() {
@@ -856,16 +959,53 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
 
     // 下载成功后，根据设置决定是否写入 metadata（歌词/封面）
     if completed_ok {
+        // 获取歌词（仅当需要写入 metadata 或单独下载 lrc 时才请求）
+        let lyric_resp = if write_metadata_enabled || download_lrc_enabled {
+            match lyrics::get_lyric_by_id(ctx.song_id).await {
+                Ok(resp) => Some(resp),
+                Err(e) => {
+                    log::warn!("获取歌词失败: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // 写入音频文件 metadata（歌词/封面）
         if write_metadata_enabled {
             write_metadata(
                 &app_handle,
-                ctx.song_id,
                 &download_dir,
                 is_saf,
                 saf_file_uri.clone(),
                 &ctx.song_info.cover_url,
+                lyric_resp.clone(),
             )
             .await;
+        }
+
+        // 单独下载 LRC 歌词文件（仅当有普通歌词且开关开启）
+        if download_lrc_enabled {
+            if let Some(lrc) = lyric_resp
+                .as_ref()
+                .and_then(|r| r.lrc.as_ref())
+                .filter(|s| !s.trim().is_empty())
+            {
+                let lrc_path = write_lrc_file(
+                    &app_handle,
+                    lrc,
+                    &download_dir,
+                    is_saf,
+                    saf_folder_uri.clone(),
+                )
+                .await;
+                if let Some(path) = lrc_path {
+                    *controller.lrc_final_path.lock().await = Some(path);
+                }
+            } else {
+                log::info!("无普通歌词，跳过 LRC 文件创建");
+            }
         }
 
         // 无论 metadata 是否写入成功，均发送下载完成事件
@@ -915,7 +1055,7 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
 /// 获取下载目录（绝对路径）及文件命名模板
 pub(crate) async fn get_download_settings(
     app_handle: &AppHandle,
-) -> (String, String, Option<String>, bool) {
+) -> (String, String, Option<String>, bool, bool) {
     use crate::storage::store_wrapper;
 
     let default_dir = crate::commands::file_ops::get_default_download_dir_impl(app_handle);
@@ -959,12 +1099,24 @@ pub(crate) async fn get_download_settings(
         .to_string();
 
     // 是否写入歌曲标签（歌词/封面）
-    let write_metadata = settings
+    let write_metadata_enabled = settings
         .get("writeMetadata")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    (dir, template, saf_folder_uri, write_metadata)
+    // 是否单独下载 LRC 歌词文件
+    let download_lrc_enabled = settings
+        .get("downloadLrc")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    (
+        dir,
+        template,
+        saf_folder_uri,
+        write_metadata_enabled,
+        download_lrc_enabled,
+    )
 }
 
 /// 将加密文件扩展名映射为解密后的真实扩展名
