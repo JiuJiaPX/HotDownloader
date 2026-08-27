@@ -14,8 +14,12 @@ import type { DataTableColumn } from 'naive-ui'
 import type { TaskRecord } from '../../types'
 import { renderActions } from './TaskRowActions'
 import MobileTaskList from './MobileTaskList.vue'
+// 导入 OS 插件，用于获取平台信息
+import { platform } from '@tauri-apps/plugin-os'
 
-const isAndroid = navigator.userAgent.toLowerCase().includes('android')
+// 使用 ref 存储 Android 状态，替代原先的同步 UA 判断
+// 使用 Tauri OS 插件准确识别平台，在 onMounted 中异步获取平台并更新
+const isAndroid = ref(false)
 
 // 响应式检测移动端
 const isMobile = ref(false)
@@ -25,7 +29,17 @@ function updateMobileStatus(e: MediaQueryListEvent | MediaQueryList) {
     isMobile.value = e.matches
 }
 
-onMounted(() => {
+onMounted(async () => {
+    // 异步获取当前平台，设置 isAndroid
+    try {
+        const currentPlatform = await platform()
+        isAndroid.value = currentPlatform === 'android'
+    } catch (error) {
+        console.warn('获取平台信息失败，默认按非 Android 处理', error)
+        isAndroid.value = false
+    }
+
+    // 原有媒体查询逻辑，保持不变
     mediaQuery = window.matchMedia('(max-width: 767px)')
     updateMobileStatus(mediaQuery)
     mediaQuery.addEventListener('change', updateMobileStatus)
@@ -182,7 +196,7 @@ const columns: DataTableColumn<TaskRecord>[] = [
                     emit: (action: string, taskId: string, extra?: Record<string, any>) => {
                         emit('action', action, taskId, extra)
                     },
-                    isAndroid, // 传入平台标识
+                    isAndroid: isAndroid.value,
                 })
             )
         },

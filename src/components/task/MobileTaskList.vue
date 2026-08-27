@@ -108,18 +108,22 @@ export default defineComponent({
                 h('div', { class: 'task-card-meta' }, [
                     h(NTag, { type: status.type as any, size: 'small' }, () => status.label),
                     h('span', { class: 'task-card-quality' }, task.quality),
-                    task.speed && task.speed > 0
+                    // 速度仅在 downloading 状态且 speed > 0 时显示，避免暂停或错误状态残留速度
+                    task.status === 'downloading' && task.speed && task.speed > 0
                         ? h('span', { class: 'task-card-speed' }, formatSpeed(task.speed))
                         : null,
                 ]),
 
-                // 进度条
-                h('div', { class: 'task-card-progress' }, [
-                    h(NProgress, {
-                        percentage: progressPercent(task),
-                        height: 12,
-                    }),
-                ]),
+                // 进度条或错误信息展示
+                // 错误状态不显示进度条，改为展示错误信息，提升可读性
+                task.status === 'error'
+                    ? h('div', { class: 'task-card-error' }, task.errorMsg || '下载失败')
+                    : h('div', { class: 'task-card-progress' }, [
+                        h(NProgress, {
+                            percentage: progressPercent(task),
+                            height: 12,
+                        }),
+                    ]),
             ]
 
             // 仅安卓设备显示文件路径，位于进度条下方
@@ -258,14 +262,21 @@ export default defineComponent({
     color: var(--color-text-secondary, #555);
 }
 
-.task-card-actions {
-    /* 操作按钮容器，自动换行 */
+/* 错误信息样式，替代进度条显示 */
+.task-card-error {
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    background: var(--bg-body);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--n-error-color, #d03050);
+    word-break: break-word;
 }
 
 .task-card-empty {
     text-align: center;
-    padding: 24px 0;
+    padding: 32px 0;
     color: var(--color-text-secondary, #555);
-    font-size: 14px;
+    font-size: 15px;
 }
 </style>
