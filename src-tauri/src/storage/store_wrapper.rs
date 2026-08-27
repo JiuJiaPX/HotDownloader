@@ -5,7 +5,7 @@ use tauri_plugin_store::StoreExt;
 pub fn load_string(app: &AppHandle, key: &str) -> Result<String, Box<dyn std::error::Error>> {
     let store = app.store("data.json")?;
     let value = store
-        .get(key.to_string())
+        .get(key)
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .unwrap_or_default();
     Ok(value)

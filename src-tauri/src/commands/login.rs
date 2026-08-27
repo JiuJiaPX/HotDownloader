@@ -63,6 +63,7 @@ pub struct LoginCredentials {
 #[derive(Debug, Clone)]
 enum MqttLoginEvent {
     /// 等待扫码。
+    #[allow(dead_code)]
     WaitingScan,
     /// 已扫码，等待确认。
     WaitingConfirm,

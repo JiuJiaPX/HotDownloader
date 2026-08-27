@@ -119,10 +119,8 @@ async fn write_metadata(
         // 优先级：逐字歌词（elrc） → 普通歌词（lrc）
         if let Some(elrc) = resp.elrc.filter(|s| !s.trim().is_empty()) {
             Some(elrc)
-        } else if let Some(lrc) = resp.lrc.filter(|s| !s.trim().is_empty()) {
-            Some(lrc)
         } else {
-            None
+            resp.lrc.filter(|s| !s.trim().is_empty())
         }
     });
 
@@ -354,11 +352,11 @@ async fn write_lrc_file(
                         return None;
                     }
                     log::info!("SAF LRC 歌词文件已保存: {}", existing_uri.uri);
-                    return Some(existing_uri.uri.clone());
+                    Some(existing_uri.uri.clone())
                 }
                 Err(e) => {
                     log::warn!("打开已有 LRC 文件失败: {}", e);
-                    return None;
+                    None
                 }
             }
         }
@@ -372,16 +370,16 @@ async fn write_lrc_file(
                             return None;
                         }
                         log::info!("SAF LRC 歌词文件已保存: {}", new_uri.uri);
-                        return Some(new_uri.uri.clone());
+                        Some(new_uri.uri.clone())
                     }
                     Err(e) => {
                         log::warn!("打开新 LRC 文件失败: {}", e);
-                        return None;
+                        None
                     }
                 },
                 Err(e) => {
                     log::warn!("创建 LRC 文件失败: {}", e);
-                    return None;
+                    None
                 }
             }
         }
@@ -799,7 +797,7 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
                 content_range
                     .to_str()
                     .ok()
-                    .and_then(|s| s.split('/').last().and_then(|n| n.parse::<u64>().ok()))
+                    .and_then(|s| s.split('/').next_back().and_then(|n| n.parse::<u64>().ok()))
                     .unwrap_or(0)
             } else {
                 response

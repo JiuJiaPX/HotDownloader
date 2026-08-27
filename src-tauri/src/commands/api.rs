@@ -143,7 +143,7 @@ pub async fn search_songs(keyword: String, page: u32, limit: u32) -> Result<Stri
         "has_more": has_more
     });
 
-    Ok(serde_json::to_string(&result).map_err(|e| format!("序列化结果失败: {}", e))?)
+    serde_json::to_string(&result).map_err(|e| format!("序列化结果失败: {}", e))
 }
 
 /// 通用歌曲解析函数
@@ -293,7 +293,7 @@ fn build_qualities(file: &Value, vs: &Value) -> Vec<Value> {
         }
 
         // 臻品母带 (size_new[0] + vs[3])
-        let size_master = size_new.get(0).and_then(|v| v.as_u64()).unwrap_or(0);
+        let size_master = size_new.first().and_then(|v| v.as_u64()).unwrap_or(0);
         if size_master > 0 && !vs3.is_empty() {
             list.push(json!({
                 "quality": "臻品母带",
@@ -371,7 +371,7 @@ async fn fetch_vkey_link(
     let midurlinfo = vkey_resp["data"]["midurlinfo"]
         .as_array()
         .ok_or("缺少 midurlinfo")?;
-    let item = midurlinfo.get(0).ok_or("未获取到文件信息")?;
+    let item = midurlinfo.first().ok_or("未获取到文件信息")?;
 
     // 提取 purl 和 ekey
     let purl = item["purl"].as_str().unwrap_or("");
@@ -518,7 +518,7 @@ pub async fn fetch_hot_keywords() -> Result<String, String> {
         }
     }
 
-    Ok(serde_json::to_string(&keywords).map_err(|e| format!("序列化结果失败: {}", e))?)
+    serde_json::to_string(&keywords).map_err(|e| format!("序列化结果失败: {}", e))
 }
 
 /// 获取搜索建议
@@ -618,8 +618,7 @@ pub async fn fetch_suggestions(keyword: String) -> Result<String, String> {
         result.insert(type_key.to_string(), json!(items));
     }
 
-    Ok(serde_json::to_string(&Value::Object(result))
-        .map_err(|e| format!("序列化结果失败: {}", e))?)
+    serde_json::to_string(&Value::Object(result)).map_err(|e| format!("序列化结果失败: {}", e))
 }
 
 /// 从用户输入中提取歌单 ID
@@ -789,5 +788,5 @@ pub async fn check_update() -> Result<String, String> {
         "current_version": env!("CARGO_PKG_VERSION")
     });
 
-    Ok(serde_json::to_string(&result).map_err(|e| format!("序列化结果失败: {}", e))?)
+    serde_json::to_string(&result).map_err(|e| format!("序列化结果失败: {}", e))
 }
