@@ -107,6 +107,10 @@ export const rustComponents: ComponentInfo[] = [
     "license": "Apache-2.0 OR MIT"
   },
   {
+    "name": "tauri-plugin-os",
+    "license": "Apache-2.0 OR MIT"
+  },
+  {
     "name": "tauri-plugin-store",
     "license": "Apache-2.0 OR MIT"
   },
@@ -138,8 +142,20 @@ export const frontendComponents: ComponentInfo[] = [
     "license": "MIT OR Apache-2.0"
   },
   {
+    "name": "@tauri-apps/plugin-os",
+    "license": "MIT OR Apache-2.0"
+  },
+  {
     "name": "@tauri-apps/plugin-store",
     "license": "MIT OR Apache-2.0"
+  },
+  {
+    "name": "dompurify",
+    "license": "(MPL-2.0 OR Apache-2.0)"
+  },
+  {
+    "name": "marked",
+    "license": "MIT"
   },
   {
     "name": "naive-ui",
@@ -148,6 +164,10 @@ export const frontendComponents: ComponentInfo[] = [
   {
     "name": "pinia",
     "license": "MIT"
+  },
+  {
+    "name": "semver",
+    "license": "ISC"
   },
   {
     "name": "vue",
