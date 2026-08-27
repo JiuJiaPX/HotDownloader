@@ -52,46 +52,9 @@
 
 <script setup lang="ts">
 import { NUl, NLi, NA } from 'naive-ui'
+import { rustComponents, frontendComponents } from '../data/licenses'
+
 const version = import.meta.env.VITE_APP_VERSION
-
-interface ComponentInfo {
-    name: string
-    license: string
-}
-
-// 后端组件列表已与 NOTICE 文件同步；包含 Tauri 官方插件、HTTP 客户端、文件系统及音频解密模块
-const rustComponents: ComponentInfo[] = [
-    { name: 'dirs', license: 'MIT / Apache-2.0' },
-    { name: 'futures-util', license: 'MIT / Apache-2.0' },
-    { name: 'log', license: 'MIT / Apache-2.0' },
-    { name: 'open', license: 'MIT' },
-    { name: 'once_cell', license: 'MIT / Apache-2.0' },
-    { name: 'reqwest', license: 'MIT / Apache-2.0' },
-    { name: 'serde', license: 'MIT / Apache-2.0' },
-    { name: 'serde_json', license: 'MIT / Apache-2.0' },
-    { name: 'tauri', license: 'MIT / Apache-2.0' },
-    { name: 'tauri-build', license: 'MIT / Apache-2.0' },
-    { name: 'tauri-plugin-android-fs', license: 'MIT / Apache-2.0' },
-    { name: 'tauri-plugin-dialog', license: 'MIT / Apache-2.0' },
-    { name: 'tauri-plugin-log', license: 'MIT / Apache-2.0' },
-    { name: 'tauri-plugin-opener', license: 'MIT / Apache-2.0' },
-    { name: 'tauri-plugin-store', license: 'MIT / Apache-2.0' },
-    { name: 'tokio', license: 'MIT' },
-    { name: 'tokio-util', license: 'MIT' },
-    { name: 'url', license: 'MIT / Apache-2.0' },
-    { name: 'umc_qmc', license: 'Apache-2.0 OR MIT' },
-]
-
-// 前端组件列表：仅列出运行时直接依赖，与 package.json dependencies 对应
-const frontendComponents: ComponentInfo[] = [
-    { name: '@tauri-apps/api', license: 'Apache-2.0 OR MIT' },
-    { name: '@tauri-apps/plugin-dialog', license: 'MIT OR Apache-2.0' },
-    { name: '@tauri-apps/plugin-store', license: 'MIT OR Apache-2.0' },
-    { name: 'naive-ui', license: 'MIT' },
-    { name: 'pinia', license: 'MIT' },
-    { name: 'vue', license: 'MIT' },
-    { name: 'vue-router', license: 'MIT' },
-]
 </script>
 
 <style scoped>
