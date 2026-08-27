@@ -85,7 +85,22 @@
                 </p>
                 <div class="update-body">
                     <n-text class="body-label">更新内容：</n-text>
-                    <div class="body-text">{{ updateInfo.body || '（无更新说明）' }}</div>
+                    <!-- 使用 v-html 渲染 Markdown 解析后的 HTML，提升可读性 -->
+                    <!-- 调用 renderMarkdown 函数生成安全 HTML；若无内容则显示默认文本 -->
+                    <div class="body-text markdown-body" v-html="renderMarkdown(updateInfo.body) || '<p>（无更新说明）</p>'">
+                    </div>
+                </div>
+                <!-- 下载安装包直链区域（当存在匹配当前平台的 assets 时显示） -->
+                <!-- 检查更新功能优化，只显示当前平台可用的安装包，避免用户下载错误文件 -->
+                <div v-if="filteredAssets.length > 0" class="assets-section">
+                    <n-text class="body-label">下载安装包：</n-text>
+                    <div class="asset-list">
+                        <!-- 使用 filteredAssets 计算属性，其根据 currentPlatform 过滤原始 assets -->
+                        <a v-for="asset in filteredAssets" :key="asset.name" class="asset-link"
+                            :href="asset.browser_download_url" target="_blank" rel="noopener noreferrer">
+                            {{ asset.name }}（{{ formatFileSize(asset.size) }}）
+                        </a>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <n-button type="primary" @click="showUpdateModal = false">关闭</n-button>
@@ -102,6 +117,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { NForm, NButton, NModal, NText } from 'naive-ui'
+// Markdown 渲染依赖
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+// 语义化版本比较库 semver
+import semver from 'semver'
+// Tauri OS 插件，用于获取当前平台信息
+import { platform } from '@tauri-apps/plugin-os'
 import QualitySetting from '../components/settings/QualitySetting.vue'
 import DowngradeSetting from '../components/settings/DowngradeSetting.vue'
 import DirectorySetting from '../components/settings/DirectorySetting.vue'
@@ -129,10 +151,18 @@ function updateNarrow(e: MediaQueryListEvent | MediaQueryList) {
     isNarrow.value = e.matches
 }
 
-onMounted(() => {
+onMounted(async () => {
     mediaQuery = window.matchMedia('(max-width: 767px)')
     updateNarrow(mediaQuery)
     mediaQuery.addEventListener('change', updateNarrow)
+
+    // 使用 async/await 获取当前平台信息，避免类型不匹配和代码繁琐
+    try {
+        currentPlatform.value = await platform()
+    } catch (err) {
+        console.warn('获取平台信息失败，将显示所有安装包', err)
+        currentPlatform.value = ''
+    }
 })
 
 onUnmounted(() => {
@@ -150,12 +180,57 @@ const checkingUpdate = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
 const showUpdateModal = ref(false)
 
-// 判断是否为较新版本：简单比较去除前缀 v 后的版本号字符串
+// 当前平台标识，用于过滤下载资产
+const currentPlatform = ref<string>('')
+
+// 根据当前平台过滤下载资产列表，实现平台相关的安装包显示，提升用户体验
+const filteredAssets = computed(() => {
+    if (!updateInfo.value || !updateInfo.value.assets) return []
+    const platformStr = currentPlatform.value
+    if (!platformStr) return updateInfo.value.assets // 平台尚未获取，显示全部
+    const assets = updateInfo.value.assets
+    if (platformStr === 'android') {
+        // Android 平台仅展示 release 版本的 APK
+        return assets.filter(a => a.name.endsWith('.apk') && a.name.toLowerCase().includes('release'))
+    } else if (platformStr === 'windows') {
+        return assets.filter(a => a.name.endsWith('.exe') || a.name.endsWith('.msi'))
+    } else if (platformStr === 'macos' || platformStr === 'darwin') {
+        return assets.filter(a => a.name.endsWith('.dmg'))
+    } else if (platformStr === 'linux') {
+        return assets.filter(a => a.name.endsWith('.deb') || a.name.endsWith('.rpm') || a.name.endsWith('.AppImage'))
+    }
+    // 其他平台显示全部
+    return assets
+})
+
+// 支持更新内容 Markdown 渲染，提升可读性
+function renderMarkdown(markdown: string): string {
+    if (!markdown) return ''
+    // 配置 marked 渲染选项：启用 GFM（GitHub Flavored Markdown）和换行转换
+    marked.setOptions({ gfm: true, breaks: true })
+    const rawHtml = marked.parse(markdown) as string
+    // 使用 DOMPurify 过滤，允许常见安全标签
+    return DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } })
+}
+
+// 将字节大小格式化为人类可读字符串
+function formatFileSize(bytes: number): string {
+    if (bytes === 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(1024))
+    const value = bytes / Math.pow(1024, i)
+    return `${value.toFixed(2)} ${units[i]}`
+}
+
+// 检查更新功能优化，使用成熟库替代手写比较，正确处理预发布版本等复杂情况
+// 去除 tag_name 可能的前缀 v，然后使用 semver.gt() 判断 latest 是否大于 current
 const isNewVersion = computed(() => {
     if (!updateInfo.value) return false
     const current = updateInfo.value.current_version
     const latest = updateInfo.value.tag_name.replace(/^v/, '')
-    return current !== latest
+    // 使用 semver.gt 比较两个版本号，返回是否 latest > current
+    // 注意：semver 库会处理预发布版本的优先级规则
+    return semver.valid(current) !== null && semver.valid(latest) !== null && semver.gt(latest, current)
 })
 
 // 显示错误通知：使用全局 $notify（NavLayout 已挂载），避免依赖未提供的 message provider
@@ -268,11 +343,77 @@ async function handleCheckUpdate() {
 
 .body-text {
     margin-top: 4px;
-    white-space: pre-wrap;
-    /* 保留换行，显示更新说明中的换行 */
+    /* 适配 Markdown 渲染后的 HTML 内容，取消 pre-wrap 改为正常换行 */
     color: var(--color-text);
     max-height: 300px;
     overflow-y: auto;
+    line-height: 1.6;
+}
+
+/* Markdown 内容的基础样式，保证标题、列表、代码块等可读 */
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+    margin: 12px 0 8px;
+    font-weight: 600;
+}
+
+.markdown-body :deep(p) {
+    margin: 8px 0;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+    padding-left: 24px;
+    margin: 8px 0;
+}
+
+.markdown-body :deep(code) {
+    background-color: var(--bg-body);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.markdown-body :deep(pre) {
+    background-color: var(--bg-body);
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+}
+
+.markdown-body :deep(pre code) {
+    background: none;
+    padding: 0;
+}
+
+.markdown-body :deep(a) {
+    color: #4098fc;
+}
+
+/* 资产列表样式 */
+.assets-section {
+    margin-bottom: 20px;
+}
+
+.asset-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.asset-link {
+    color: #4098fc;
+    text-decoration: none;
+    font-size: 14px;
+    transition: opacity 0.2s;
+}
+
+.asset-link:hover {
+    opacity: 0.8;
+    text-decoration: underline;
 }
 
 .modal-actions {

@@ -778,6 +778,31 @@ pub async fn check_update() -> Result<String, String> {
     let published_at = data["published_at"].as_str().unwrap_or("").to_string();
     let prerelease = data["prerelease"].as_bool().unwrap_or(false);
 
+    // 提取 assets 数组（发布资源），为前端提供下载安装包的直链信息
+    let assets = data["assets"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|asset| {
+                    let name = asset["name"].as_str().unwrap_or("").to_string();
+                    let browser_download_url = asset["browser_download_url"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    let size = asset["size"].as_u64().unwrap_or(0);
+                    if name.is_empty() || browser_download_url.is_empty() {
+                        return None;
+                    }
+                    Some(json!({
+                        "name": name,
+                        "browser_download_url": browser_download_url,
+                        "size": size
+                    }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     let result = json!({
         "tag_name": tag_name,
         "name": name,
@@ -785,7 +810,8 @@ pub async fn check_update() -> Result<String, String> {
         "html_url": html_url,
         "published_at": published_at,
         "prerelease": prerelease,
-        "current_version": env!("CARGO_PKG_VERSION")
+        "current_version": env!("CARGO_PKG_VERSION"),
+        "assets": assets
     });
 
     serde_json::to_string(&result).map_err(|e| format!("序列化结果失败: {}", e))

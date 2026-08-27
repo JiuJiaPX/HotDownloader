@@ -184,4 +184,12 @@ export interface UpdateInfo {
     published_at: string
     prerelease: boolean
     current_version: string
+    assets: UpdateAsset[]
+}
+
+// assets 字段：发布资源数组，用于展示下载安装包直链
+export interface UpdateAsset {
+    name: string
+    browser_download_url: string
+    size: number
 }

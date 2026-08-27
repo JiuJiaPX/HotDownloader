@@ -20,6 +20,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_android_fs::init())
+        .plugin(tauri_plugin_os::init()) // 注册 OS 插件，提供平台检测能力
         .setup(|app| {
             let engine = DownloadEngine::new(app.handle().clone());
             let max_concurrent = match store_wrapper::load_string(app.handle(), "settings") {
