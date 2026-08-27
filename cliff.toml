@@ -8,7 +8,7 @@ body = """
     ## [未发布]
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
-    ### {{ group }}
+    ### {{ group | striptags | trim }}
     {% for commit in commits %}
         - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
             {% if commit.breaking %}[**破坏性变更**] {% endif %}\
@@ -39,25 +39,25 @@ commit_preprocessors = []
 protect_breaking_commits = false
 # 提交解析规则：决定分组、跳过或标记
 commit_parsers = [
-    { message = "^feat", group = "功能更新" },
-    { message = "^fix", group = "Bug 修复" },
-    { message = "^doc", group = "文档更新" },
-    { message = "^perf", group = "性能优化" },
-    { message = "^refactor", group = "重构" },
-    { message = "^style", group = "代码风格" },
-    { message = "^test", group = "测试" },
+    { message = "^feat", group = "<!-- 0 -->功能更新" },
+    { message = "^fix", group = "<!-- 1 -->Bug 修复" },
+    { message = "^doc", group = "<!-- 2 -->文档更新" },
+    { message = "^perf", group = "<!-- 3 -->性能优化" },
+    { message = "^refactor", group = "<!-- 4 -->重构" },
+    { message = "^style", group = "<!-- 5 -->代码风格" },
+    { message = "^test", group = "<!-- 6 -->测试" },
     # 以下这些 chore 提交不会出现在 changelog 中
     { message = "^chore\\(release\\): prepare for", skip = true },
     { message = "^chore\\(deps.*\\)", skip = true },
     { message = "^chore\\(pr\\)", skip = true },
     { message = "^chore\\(pull\\)", skip = true },
     # 其他 chore 和 ci 提交归入“其他杂项”
-    { message = "^chore|^ci|^build", group = "其他杂项" },
+    { message = "^chore|^ci|^build", group = "<!-- 7 -->其他杂项" },
     # 安全相关提交（通过正文识别）
-    { body = ".*security", group = "安全修复" },
-    { message = "^revert", group = "回滚" },
+    { body = ".*security", group = "<!-- 8 -->安全修复" },
+    { message = "^revert", group = "<!-- 9 -->回滚" },
     # 兜底：所有未匹配的提交归入“未分类”
-    { message = ".*", group = "未分类" },
+    { message = ".*", group = "<!-- 10 -->未分类" },
 ]
 # 不排除未被任何解析器匹配的提交
 filter_commits = false
