@@ -29,15 +29,25 @@ import { ref, onMounted } from 'vue'
 import { NFormItem, NInput, NInputGroup, NButton, NText } from 'naive-ui'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+// 导入 OS 插件，用于检测 Android 平台
+import { platform } from '@tauri-apps/plugin-os'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 const settingsStore = useSettingsStore()
 
-// 简单平台判断
-const isAndroid = ref(navigator.userAgent.toLowerCase().includes('android'))
+// 不再使用 UA 判断，改用 platform() 异步获取，初始值为 false
+const isAndroid = ref(false)
 
-// Android 端初始化：若未选择 SAF，则确保使用默认下载目录
+// Android 端初始化：异步获取平台信息，若为 Android 且未选择 SAF，则确保使用默认下载目录
 onMounted(async () => {
+    try {
+        const currentPlatform = await platform()
+        isAndroid.value = currentPlatform === 'android'
+    } catch (error) {
+        console.warn('获取平台信息失败，默认按非 Android 处理', error)
+        isAndroid.value = false
+    }
+
     if (isAndroid.value && !settingsStore.settings.safFolderUri) {
         await settingsStore.getDefaultDownloadDir()
     }
