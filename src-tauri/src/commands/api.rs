@@ -1,8 +1,27 @@
 use once_cell::sync::Lazy;
+use rand::Rng;
 use serde_json::{json, Value};
 use std::path::Path;
 use tauri::command;
 use url::Url;
+
+/// GUID 可用字符集，用于生成随机 guid
+/// https://github.com/AstronW/netease-qq-music-api/blob/11d8c5c0e23fb74169292516592b5efe9ac59540/src/platform/tencent/utils.rs#L16
+const GUID_CHARSET: &[u8] = b"ABCDEF1234567890";
+
+/// 生成一个 32 位随机 GUID，由大写字母和数字组成。
+/// 为 API 请求的 comm 字段提供随机 guid，替换原有硬编码值，避免固定 guid 可能导致的限制或风控。
+/// 使用 rand 0.9 的 `rng()` 与 `random_range` 生成 32 个随机字符。
+/// https://github.com/AstronW/netease-qq-music-api/blob/11d8c5c0e23fb74169292516592b5efe9ac59540/src/platform/tencent/utils.rs#L28
+pub fn get_guid() -> String {
+    let mut rng = rand::rng();
+    (0..32)
+        .map(|_| {
+            let idx = rng.random_range(0..GUID_CHARSET.len());
+            GUID_CHARSET[idx] as char
+        })
+        .collect()
+}
 
 /// 全局复用 HTTP 客户端，启用连接池、超时等
 pub(crate) static CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
@@ -30,6 +49,7 @@ pub async fn search_songs(keyword: String, page: u32, limit: u32) -> Result<Stri
             "cv": "14090508",
             "v": "14090508",
             "tmeAppID": "qqmusic",
+            "guid": get_guid(),
             "phonetype": "EBG-AN10",
             "deviceScore": "553.47",
             "devicelevel": "50",
@@ -286,113 +306,47 @@ fn build_qualities(file: &Value, vs: &Value) -> Vec<Value> {
     list
 }
 
-/// 加密文件（.mgg / .mflac）专用，同时获取 purl 和 ekey
-/// https://github.com/chrisdong/FileHub/blob/e1d752e1f29f877b7c895ae5aaff32a179fad051/root/importURLs/lxmusic/HeiMusic%E8%81%9A%E5%90%88%E6%BA%90_v1.1.5.js#L287
-async fn fetch_encrypted_link(song_mid: &str, filename: &str) -> Result<(String, String), String> {
+/// 统一获取下载链接与解密密钥（新接口：vkey.GetVkeyServer.CgiGetVkey）
+/// 替换旧的加密/非加密分离接口，统一使用一个接口获取所有品质的下载链接
+/// 登录态通过 comm 和 param 中的 uin 字段传递，未登录时为空字符串
+/// 响应中的 sip 数组为优先 CDN 列表，若不为空则使用第一个作为下载 URL 前缀，否则使用默认 CDN
+/// purl 为不带 CDN 的相对路径，ekey 为解密密钥（可能为空）
+/// 最终返回值中，ekey 是否生效由调用方根据文件后缀决定，本函数原样返回响应中的 ekey
+/// https://github.com/lyswhut/lx-music-source/blob/55eb9881dad6ca895505352f3a0a7d1dfa3444e0/src/apis/tx.js#L42
+async fn fetch_vkey_link(
+    song_mid: &str,
+    filename: &str,
+    uin: Option<&str>,
+    authst: Option<&str>,
+) -> Result<(String, String), String> {
+    // 构造请求体，comm 和 param 中携带登录态，guid 动态生成
     let request_body = json!({
+        "loginUin": uin.unwrap_or(""),
         "comm": {
-            "ct": "19",
-            "cv": "0",
-            "guid": "",
-            "tmeAppID": "qqmusic",
-            "qq": "0"
-        },
-        "music.vkey.GetEVkey.CgiGetHotVkey": {
-            "module": "music.vkey.GetEVkey",
-            "method": "CgiGetHotVkey",
-            "param": {
-                "filename": [filename],
-                "songmid": [song_mid]
-            }
-        },
-        "music.vkey.GetEVkey.GetEkey": {
-            "module": "music.vkey.GetEVkey",
-            "method": "GetEkey",
-            "param": {
-                "finfo": [
-                    {
-                        "filename": filename,
-                        "mid": song_mid
-                    }
-                ]
-            }
-        }
-    });
-
-    let resp = CLIENT
-        .post("https://ut.y.qq.com/cgi-bin/musicu.fcg")
-        .header("Content-Type", "application/json")
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| format!("网络错误: {}", e))?;
-
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("读取响应失败: {}", e))?;
-    let data: Value = serde_json::from_str(&text).map_err(|e| format!("解析响应失败: {}", e))?;
-
-    // 提取 purl
-    let vkey_resp = &data["music.vkey.GetEVkey.CgiGetHotVkey"];
-    if vkey_resp["code"].as_i64().unwrap_or(-1) != 0 {
-        return Err(format!("CgiGetHotVkey 错误: code={}", vkey_resp["code"]));
-    }
-    let urls = vkey_resp["data"]["urls"].as_array().ok_or("缺少 urls")?;
-    let item = urls.get(0).ok_or("未获取到文件信息")?;
-    let purl = item["purl"].as_str().unwrap_or("");
-    // 检查是否有错误标记
-    let result_code = item["result"].as_i64().unwrap_or(0);
-    if purl.is_empty() || result_code != 0 {
-        let err_msg = if result_code == 104003 {
-            "无法获取下载链接".to_string()
-        } else {
-            format!("获取下载链接失败，错误码: {}", result_code).to_string()
-        };
-        return Err(err_msg);
-    }
-
-    // 提取 ekey
-    let ekey_resp = &data["music.vkey.GetEVkey.GetEkey"];
-    if ekey_resp["code"].as_i64().unwrap_or(-1) != 0 {
-        return Err(format!("GetEkey 错误: code={}", ekey_resp["code"]));
-    }
-    let ekeyinfo = ekey_resp["data"]["ekeyinfo"]
-        .as_array()
-        .ok_or("缺少 ekeyinfo")?;
-    let ekey = ekeyinfo
-        .get(0)
-        .and_then(|e| e["ekey"].as_str())
-        .unwrap_or("")
-        .to_string();
-
-    // 拼接完整下载 URL（使用主 CDN）
-    let full_url = format!("https://wx.music.tc.qq.com/{}", purl);
-    Ok((full_url, ekey))
-}
-
-/// 非加密文件专用，仅获取 purl，无需密钥
-/// https://github.com/lyswhut/lx-music-source/blob/55eb9881dad6ca895505352f3a0a7d1dfa3444e0/src/apis/tx.js#L30
-async fn fetch_plain_link(song_mid: &str, filename: &str) -> Result<(String, String), String> {
-    let request_body = json!({
-        "comm": {
+            "format": "json",
             "ct": 24,
             "cv": 0,
             "tmeAppID": "qqmusic",
-            "format": "json"
+            "uin": uin.unwrap_or(""),
+            "qq": uin.unwrap_or(""),
+            "authst": authst.unwrap_or("")
         },
-        "req_0": {
+        "vkey.GetVkeyServer.CgiGetVkey": {
             "module": "vkey.GetVkeyServer",
             "method": "CgiGetVkey",
             "param": {
-                "guid": "10000",
+                "guid": get_guid(),
                 "filename": [filename],
                 "songmid": [song_mid],
-                "songtype": [0]
+                "songtype": [0],
+                "uin": uin.unwrap_or(""),
+                "loginflag": 1,
+                "platform": "20"
             }
         }
     });
 
+    // 发送 POST 请求到统一接口
     let resp = CLIENT
         .post("https://u.y.qq.com/cgi-bin/musicu.fcg")
         .header("Content-Type", "application/json")
@@ -407,24 +361,24 @@ async fn fetch_plain_link(song_mid: &str, filename: &str) -> Result<(String, Str
         .map_err(|e| format!("读取响应失败: {}", e))?;
     let data: Value = serde_json::from_str(&text).map_err(|e| format!("解析响应失败: {}", e))?;
 
-    // 检查外层 code
-    if data["code"].as_i64().unwrap_or(-1) != 0 {
-        return Err(format!("接口错误: code={}", data["code"]));
-    }
-    let req_0 = &data["req_0"];
-    if req_0["code"].as_i64().unwrap_or(-1) != 0 {
-        return Err(format!("请求错误: code={}", req_0["code"]));
+    // 提取 vkey.GetVkeyServer.CgiGetVkey 子响应
+    let vkey_resp = &data["vkey.GetVkeyServer.CgiGetVkey"];
+    if vkey_resp["code"].as_i64().unwrap_or(-1) != 0 {
+        return Err(format!("CgiGetVkey 错误: code={}", vkey_resp["code"]));
     }
 
-    let midurlinfo = req_0["data"]["midurlinfo"]
+    // 提取 midurlinfo 数组
+    let midurlinfo = vkey_resp["data"]["midurlinfo"]
         .as_array()
         .ok_or("缺少 midurlinfo")?;
-    let item = midurlinfo.get(0).ok_or("未找到歌曲信息")?;
+    let item = midurlinfo.get(0).ok_or("未获取到文件信息")?;
 
+    // 提取 purl 和 ekey
     let purl = item["purl"].as_str().unwrap_or("");
-    let result_code = item["result"].as_i64().unwrap_or(0);
+    let ekey = item["ekey"].as_str().unwrap_or("").to_string();
 
     // 检查 purl 是否为空或 result 是否非0
+    let result_code = item["result"].as_i64().unwrap_or(0);
     if purl.is_empty() || result_code != 0 {
         let err_msg = match result_code {
             104003 => "无法获取下载链接".to_string(),
@@ -438,20 +392,40 @@ async fn fetch_plain_link(song_mid: &str, filename: &str) -> Result<(String, Str
         return Err(err_msg);
     }
 
-    let full_url = format!("https://wx.music.tc.qq.com/{}", purl);
-    // 非加密文件无需密钥，返回空字符串
-    Ok((full_url, String::new()))
+    // 确定下载 URL 前缀：优先使用响应中的 sip 列表第一个地址，若为空则使用默认 CDN
+    let default_cdn = "https://wx.music.tc.qq.com/";
+    let cdn_prefix = vkey_resp["data"]["sip"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default_cdn);
+
+    // 拼接完整下载 URL（使用选定的 CDN 前缀 + 相对路径）
+    let full_url = format!("{}{}", cdn_prefix, purl);
+    Ok((full_url, ekey))
 }
 
 /// 获取下载链接与解密密钥
-/// 参数：song_id 为歌曲 mid，filename 为品质文件名（如 M800001abc.mp3）
+/// 参数：song_mid 为歌曲 mid，filename 为品质文件名（如 M800001abc.mp3）
 /// 返回 (完整下载链接, 解密密钥)，非加密文件密钥为空
 /// 核心函数：获取下载链接和密钥，供下载模块调用
 /// 获取下载链接与解密密钥（对外统一入口）
+/// 传入 AppHandle 以读取登录态，并将登录态注入请求
 pub(crate) async fn get_download_link(
+    app_handle: &tauri::AppHandle,
     song_mid: &str,
     filename: &str,
 ) -> Result<(String, String), String> {
+    // 读取登录态（未登录时返回 None）
+    // 从 settings 获取 loginUin 与 authst
+    let (uin, authst) = crate::commands::login::get_login_credentials(app_handle).await;
+
+    // 统一调用新接口获取链接和密钥
+    let (url, ekey) =
+        fetch_vkey_link(song_mid, filename, uin.as_deref(), authst.as_deref()).await?;
+
+    // 根据文件扩展名判断是否为加密文件，决定是否使用 ekey
     let ext = Path::new(filename)
         .extension()
         .and_then(|s| s.to_str())
@@ -459,15 +433,20 @@ pub(crate) async fn get_download_link(
         .unwrap_or_default();
 
     if ext == "mgg" || ext == "mflac" {
-        fetch_encrypted_link(song_mid, filename).await
+        Ok((url, ekey))
     } else {
-        fetch_plain_link(song_mid, filename).await
+        // 非加密文件，强制密钥为空
+        Ok((url, String::new()))
     }
 }
 
 #[command]
-pub async fn fetch_download_link(song_mid: String, filename: String) -> Result<String, String> {
-    let (url, key) = get_download_link(&song_mid, &filename).await?;
+pub async fn fetch_download_link(
+    app: tauri::AppHandle,
+    song_mid: String,
+    filename: String,
+) -> Result<String, String> {
+    let (url, key) = get_download_link(&app, &song_mid, &filename).await?;
     let result = json!({ "url": url, "key": key });
     Ok(result.to_string())
 }
@@ -480,7 +459,7 @@ pub async fn fetch_hot_keywords() -> Result<String, String> {
         "comm": {
             "ct": "19",
             "cv": "1803",
-            "guid": "0",
+            "guid": get_guid(),
             "patch": "118",
             "psrf_access_token_expiresAt": 0,
             "psrf_qqaccess_token": "",
