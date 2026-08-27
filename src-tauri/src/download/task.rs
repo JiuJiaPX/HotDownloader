@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{Picture, PictureType};
-use lofty::tag::{ItemKey, Tag};
+use lofty::tag::{ItemKey, Tag, TagType};
 use once_cell::sync::Lazy;
 use reqwest::header::{CONTENT_LENGTH, RANGE};
 use reqwest::StatusCode;
@@ -198,6 +198,16 @@ async fn write_metadata(
             return;
         }
     };
+
+    // 尽量保留 ID3v1 标签，仅当待写入歌词含有多字节字符（如中文）且文件存在 ID3v1 时，主动移除 ID3v1，避免 lofty 保存时因编码转换导致 panic。
+    let needs_remove_id3v1 = lyric_text
+        .as_ref()
+        .map_or(false, |text| text.chars().any(|c| c as u32 > 0xFF));
+    if needs_remove_id3v1 {
+        if tagged_file.remove(TagType::Id3v1).is_some() {
+            log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签，避免写入多字节字符时出错");
+        }
+    }
 
     // 确保存在主标签
     let tag_type = tagged_file.primary_tag_type();
