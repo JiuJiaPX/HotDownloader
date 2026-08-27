@@ -28,6 +28,7 @@
                     <DownloadLrcSetting />
                     <ConcurrencySetting />
                     <JumpToTaskSetting />
+                    <DuplicateStrategySetting />
                 </n-form>
             </div>
         </template>
@@ -49,6 +50,7 @@
                 <DownloadLrcSetting />
                 <ConcurrencySetting />
                 <JumpToTaskSetting />
+                <DuplicateStrategySetting />
                 <ClearHistoryButton />
             </n-form>
         </template>
@@ -110,6 +112,7 @@ import ClearHistoryButton from '../components/settings/ClearHistoryButton.vue'
 import WriteMetadataSetting from '../components/settings/WriteMetadataSetting.vue'
 import DownloadLrcSetting from '../components/settings/DownloadLrcSetting.vue'
 import LoginSetting from '../components/settings/LoginSetting.vue'
+import DuplicateStrategySetting from '../components/settings/DuplicateStrategySetting.vue'
 import * as musicApi from '../api/musicApi'
 import type { UpdateInfo } from '../types'
 

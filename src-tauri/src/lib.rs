@@ -48,6 +48,7 @@ pub fn run() {
             commands::tasks::load_tasks,
             commands::tasks::save_tasks,
             commands::tasks::add_download_task,
+            commands::tasks::check_download_path,
             commands::tasks::enqueue_task,
             commands::tasks::pause_task,
             commands::tasks::resume_task,

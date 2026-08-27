@@ -58,7 +58,7 @@ export const useTaskStore = defineStore('tasks', () => {
     }
 
     // ---- 任务操作 ----
-    function addTask(task: TaskRecord) {
+    function addTask(task: TaskRecord, savePath?: string) {
         tasks.value.push(task)
         saveTasks()
         invoke('add_download_task', {
@@ -66,7 +66,7 @@ export const useTaskStore = defineStore('tasks', () => {
             songId: task.songId,
             songMid: task.songMid,
             url: '',
-            savePath: '',
+            savePath: savePath || '',
             quality: task.quality,
             filename: task.filename,   // 传递品质文件名
             key: '',

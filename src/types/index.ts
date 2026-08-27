@@ -41,6 +41,8 @@ export interface Settings {
     refreshKey?: string
     accessToken?: string
     openid?: string
+    // 重复文件处理策略：ask=弹窗询问，overwrite=覆盖，rename=自动重命名，cancel=取消下载
+    duplicateStrategy?: 'ask' | 'overwrite' | 'rename' | 'cancel'
 }
 
 /** 歌曲可用的单个品质项 */
@@ -170,6 +172,7 @@ export const DEFAULT_SETTINGS: Settings = {
     refreshKey: '',
     accessToken: '',
     openid: '',
+    duplicateStrategy: 'ask',
 }
 
 // GitHub 最新 release 信息

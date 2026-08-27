@@ -401,7 +401,7 @@ async fn wait_for_resume_async(controller: &TaskController) -> bool {
 
 /// 实际执行下载的函数
 pub async fn download_task(ctx: TaskContext, controller: TaskController, app_handle: AppHandle) {
-    // 获取设置并增加 writeMetadata
+    // 获取全部设置，避免在 resolve_download_path 中重复调用
     let (
         dir_setting,
         template_setting,
@@ -410,34 +410,16 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
         download_lrc_enabled,
     ) = get_download_settings(&app_handle).await;
     // 1. 构建最终保存路径（只需一次）
-    let (is_saf, download_dir, saf_folder_uri) = {
-        if !ctx.save_path.is_empty() {
-            (false, ctx.save_path.clone(), None)
-        } else {
-            let dir = dir_setting.clone();
-            let template = template_setting.clone();
-            let saf_uri = saf_uri_setting.clone();
-            if dir == "saf://" && cfg!(target_os = "android") && saf_uri.is_some() {
-                let fname = filename::build_filename(&template, &ctx.song_info);
-                let raw_ext = Path::new(&ctx.quality_filename)
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("flac");
-                let ext = map_decrypted_extension(raw_ext);
-                let file_name = format!("{}.{}", fname, ext);
-                (true, file_name, saf_uri)
-            } else {
-                let fname = filename::build_filename(&template, &ctx.song_info);
-                let raw_ext = Path::new(&ctx.quality_filename)
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("flac");
-                // 映射解密后的扩展名
-                let ext = map_decrypted_extension(raw_ext);
-                let full_path = Path::new(&dir).join(format!("{}.{}", fname, ext));
-                (false, full_path.to_string_lossy().to_string(), None)
-            }
-        }
+    let (is_saf, download_dir, saf_folder_uri) = if !ctx.save_path.is_empty() {
+        (false, ctx.save_path.clone(), None)
+    } else {
+        resolve_download_path(
+            &dir_setting,
+            &template_setting,
+            saf_uri_setting.as_deref(),
+            &ctx.song_info,
+            &ctx.quality_filename,
+        )
     };
 
     log::info!("任务 {} 开始下载，文件路径: {}", ctx.task_id, download_dir);
@@ -1122,6 +1104,37 @@ pub(crate) async fn get_download_settings(
         write_metadata_enabled,
         download_lrc_enabled,
     )
+}
+
+/// 解析最终下载路径。
+/// 根据传入的设置、模板和歌曲信息，返回是否为 SAF 模式、最终路径或文件名、SAF 文件夹 URI。
+/// 该函数不负责读取设置，由调用方提供，避免重复调用 `get_download_settings`。
+pub(crate) fn resolve_download_path(
+    dir_setting: &str,
+    template_setting: &str,
+    saf_uri_setting: Option<&str>,
+    song_info: &super::task::SongInfo,
+    quality_filename: &str,
+) -> (bool, String, Option<String>) {
+    if dir_setting == "saf://" && cfg!(target_os = "android") && saf_uri_setting.is_some() {
+        let fname = filename::build_filename(template_setting, song_info);
+        let raw_ext = Path::new(quality_filename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("flac");
+        let ext = map_decrypted_extension(raw_ext);
+        let file_name = format!("{}.{}", fname, ext);
+        (true, file_name, saf_uri_setting.map(|s| s.to_string()))
+    } else {
+        let fname = filename::build_filename(template_setting, song_info);
+        let raw_ext = Path::new(quality_filename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("flac");
+        let ext = map_decrypted_extension(raw_ext);
+        let full_path = Path::new(dir_setting).join(format!("{}.{}", fname, ext));
+        (false, full_path.to_string_lossy().to_string(), None)
+    }
 }
 
 /// 将加密文件扩展名映射为解密后的真实扩展名

@@ -54,6 +54,30 @@ export async function getLyricBySongId(songId: number): Promise<LyricResponse> {
     return invoke<LyricResponse>('get_lyric_by_id', { songId });
 }
 
+// 检查下载路径是否存在，返回原始路径、是否存在及建议的重命名路径
+export async function checkDownloadPath(params: {
+    songId: number
+    songMid: string
+    songTitle: string
+    artist: string
+    album: string
+    coverUrl: string
+    qualityFilename: string
+    quality: string
+}): Promise<{ original_path: string; exists: boolean; suggested_path: string; is_saf: boolean }> {
+    const json = await invoke<string>('check_download_path', {
+        songId: params.songId,
+        songMid: params.songMid,
+        songTitle: params.songTitle,
+        artist: params.artist,
+        album: params.album,
+        coverUrl: params.coverUrl,
+        qualityFilename: params.qualityFilename,
+        quality: params.quality,
+    })
+    return JSON.parse(json)
+}
+
 // ==================== 登录相关 API ====================
 
 // 登录二维码返回

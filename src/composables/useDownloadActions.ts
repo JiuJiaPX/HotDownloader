@@ -1,11 +1,12 @@
 import { h, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useDialog, useNotification } from 'naive-ui'
+import { useDialog, useNotification, NButton } from 'naive-ui'
 import type { Quality, SongInfo, QualityItem } from '../types'
 import { QUALITY_DOWNGRADE_ORDER } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTaskStore } from '../stores/taskStore'
 import QualitySelector from '../components/search/QualitySelector.vue'
+import * as musicApi from '../api/musicApi'
 
 // 下载逻辑
 export function useDownloadActions() {
@@ -51,6 +52,53 @@ export function useDownloadActions() {
         })
     }
 
+    /** 弹出重复文件处理选择框，返回用户选择 */
+    function askDuplicateAction(songTitle: string): Promise<'overwrite' | 'rename' | 'cancel'> {
+        return new Promise((resolve) => {
+            const d = dialog.create({
+                title: '文件已存在',
+                content: `歌曲“${songTitle}”在下载目录中已存在同名文件，请选择处理方式：`,
+                action: () => [
+                    h(
+                        NButton,
+                        {
+                            size: 'small',
+                            onClick: () => {
+                                resolve('overwrite')
+                                d.destroy()
+                            },
+                        },
+                        { default: () => '覆盖' }
+                    ),
+                    h(
+                        NButton,
+                        {
+                            size: 'small',
+                            type: 'primary',
+                            onClick: () => {
+                                resolve('rename')
+                                d.destroy()
+                            },
+                        },
+                        { default: () => '保留两份' }
+                    ),
+                    h(
+                        NButton,
+                        {
+                            size: 'small',
+                            type: 'error',
+                            onClick: () => {
+                                resolve('cancel')
+                                d.destroy()
+                            },
+                        },
+                        { default: () => '取消' }
+                    ),
+                ],
+            });
+        });
+    }
+
     /**
      * 根据期望品质和歌曲可用品质列表，返回实际可用的品质项（含 filename）
      * 若无法满足且开启自动降级，则按降级顺序选择第一个可用品质
@@ -70,6 +118,59 @@ export function useDownloadActions() {
             }
         }
         return null
+    }
+
+    /**
+     * 处理重复文件策略，返回 savePath 或 null（取消）
+     */
+    async function handleDuplicate(
+        song: SongInfo,
+        resolved: QualityItem
+    ): Promise<string | null> {
+        const pathInfo = await musicApi.checkDownloadPath({
+            songId: song.id,
+            songMid: song.mid,
+            songTitle: song.title,
+            artist: song.artist,
+            album: song.album,
+            coverUrl: song.coverUrl,
+            qualityFilename: resolved.filename,
+            quality: resolved.quality,
+        });
+
+        if (!pathInfo.exists) {
+            return '';
+        }
+
+        const strategy = settingsStore.settings.duplicateStrategy || 'ask';
+
+        if (strategy === 'cancel') {
+            notification.info({
+                title: '已取消下载',
+                description: `歌曲“${song.title}”已存在，取消下载`,
+                duration: 3000,
+            });
+            return null;
+        } else if (strategy === 'rename') {
+            return pathInfo.suggested_path;
+        } else if (strategy === 'overwrite') {
+            return '';
+        } else {
+            // ask
+            const action = await askDuplicateAction(song.title);
+            if (action === 'cancel') {
+                notification.info({
+                    title: '已取消下载',
+                    description: `歌曲“${song.title}”已存在，取消下载`,
+                    duration: 3000,
+                });
+                return null;
+            } else if (action === 'rename') {
+                return pathInfo.suggested_path;
+            } else {
+                return '';
+            }
+        }
     }
 
     async function downloadSingle(
@@ -116,6 +217,9 @@ export function useDownloadActions() {
                 return
             }
 
+            const savePath = await handleDuplicate(song, resolved);
+            if (savePath === null) return;
+
             const taskId = generateTaskId()
             taskStore.addTask({
                 id: taskId,
@@ -133,7 +237,7 @@ export function useDownloadActions() {
                 downloaded: 0,
                 retryCount: 0,
                 addedAt: Date.now(),
-            })
+            }, savePath)
 
             if (settingsStore.settings.jumpToTask) {
                 router.push('/task')
@@ -220,6 +324,9 @@ export function useDownloadActions() {
                     continue
                 }
 
+                const savePath = await handleDuplicate(song, resolved);
+                if (savePath === null) continue;
+
                 const taskId = generateTaskId()
                 taskStore.addTask({
                     id: taskId,
@@ -237,7 +344,7 @@ export function useDownloadActions() {
                     downloaded: 0,
                     retryCount: 0,
                     addedAt: Date.now(),
-                })
+                }, savePath)
             }
 
             if (errorCount > 0) {
