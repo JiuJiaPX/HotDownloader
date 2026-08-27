@@ -47,7 +47,7 @@ regex = "1.13.1"
 lofty = "0.22.2"
 async-tungstenite = { version = "0.32.1", features = [
     "tokio-runtime",
-    "tokio-rustls-native-certs",
+    "tokio-rustls-webpki-roots",
 ] }
 rumqttc = "0.25.1"
 bytes = "1.12.1"
