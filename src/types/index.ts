@@ -34,6 +34,13 @@ export interface Settings {
     safFolderName?: string
     writeMetadata: boolean
     downloadLrc: boolean
+    // 登录相关字段，可选，未登录时不设置
+    loginUin?: string
+    authst?: string
+    refreshToken?: string
+    refreshKey?: string
+    accessToken?: string
+    openid?: string
 }
 
 /** 歌曲可用的单个品质项 */
@@ -157,6 +164,12 @@ export const DEFAULT_SETTINGS: Settings = {
     jumpToTask: true,
     writeMetadata: false,
     downloadLrc: false,
+    loginUin: '',
+    authst: '',
+    refreshToken: '',
+    refreshKey: '',
+    accessToken: '',
+    openid: '',
 }
 
 // GitHub 最新 release 信息

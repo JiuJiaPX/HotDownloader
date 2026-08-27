@@ -66,6 +66,11 @@ pub fn run() {
             commands::api::fetch_playlist_songs,
             commands::api::check_update,
             commands::lyrics::get_lyric_by_id,
+            commands::login::create_qr_login,
+            commands::login::check_qr_login,
+            commands::login::login_with_uin_authst,
+            commands::login::logout,
+            commands::login::get_login_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

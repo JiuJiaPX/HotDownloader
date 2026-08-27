@@ -53,3 +53,71 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
 export async function getLyricBySongId(songId: number): Promise<LyricResponse> {
     return invoke<LyricResponse>('get_lyric_by_id', { songId });
 }
+
+// ==================== 登录相关 API ====================
+
+// 登录二维码返回
+export interface QrLoginResult {
+    qrcode_id: string
+    qr_base64: string
+}
+
+// 登录轮询结果
+export interface LoginCheckResult {
+    status: 'waiting' | 'scanned' | 'confirmed' | 'expired' | 'canceled' | 'error'
+    credentials?: LoginCredentials
+    message?: string
+}
+
+// 登录凭据
+export interface LoginCredentials {
+    uin: string
+    authst: string
+    refreshToken: string
+    refreshKey: string
+    accessToken: string
+    openid: string
+}
+
+// 获取登录二维码
+export async function createQrLogin(): Promise<QrLoginResult> {
+    const json = await invoke<string>('create_qr_login')
+    return JSON.parse(json) as QrLoginResult
+}
+
+// 轮询二维码登录状态
+export async function checkQrLogin(qrcodeId: string): Promise<LoginCheckResult> {
+    const json = await invoke<string>('check_qr_login', { qrcodeId })
+    return JSON.parse(json) as LoginCheckResult
+}
+
+// 使用 uin + authst 手动登录，可选字段用于刷新登录（不填传空字符串）
+export async function loginWithUinAuthst(
+    uin: string,
+    authst: string,
+    refreshToken: string = '',
+    refreshKey: string = '',
+    accessToken: string = '',
+    openid: string = ''
+): Promise<LoginCredentials> {
+    const json = await invoke<string>('login_with_uin_authst', {
+        uin,
+        authst,
+        refreshToken,
+        refreshKey,
+        accessToken,
+        openid,
+    })
+    return JSON.parse(json) as LoginCredentials
+}
+
+// 退出登录
+export async function logout(): Promise<void> {
+    await invoke('logout')
+}
+
+// 查询登录状态
+export async function getLoginStatus(): Promise<{ logged_in: boolean; uin: string }> {
+    const json = await invoke<string>('get_login_status')
+    return JSON.parse(json) as { logged_in: boolean; uin: string }
+}

@@ -2,6 +2,14 @@
     <div class="settings-view" :class="{ 'is-narrow': isNarrow }">
         <!-- 移动端：分组纵向布局 -->
         <template v-if="isNarrow">
+            <!-- 账号设置：独立分类，位于基本设置上方，增加底部间距避免与下方黏连 -->
+            <div class="settings-section account-section">
+                <h2 class="section-title">账号设置</h2>
+                <n-form label-placement="top">
+                    <LoginSetting />
+                </n-form>
+            </div>
+
             <div class="settings-section">
                 <h2 class="section-title">基本设置</h2>
                 <n-form label-placement="top">
@@ -26,6 +34,12 @@
 
         <!-- 桌面端：原有左右分栏表单 -->
         <template v-else>
+            <!-- 账号设置：独立分类，位于基本设置上方，增加底部间距避免与下方黏连 -->
+            <div class="settings-section account-section">
+                <h2 class="section-title">账号设置</h2>
+                <LoginSetting />
+            </div>
+
             <n-form label-placement="left" label-width="180">
                 <QualitySetting />
                 <DowngradeSetting />
@@ -95,6 +109,7 @@ import JumpToTaskSetting from '../components/settings/JumpToTaskSetting.vue'
 import ClearHistoryButton from '../components/settings/ClearHistoryButton.vue'
 import WriteMetadataSetting from '../components/settings/WriteMetadataSetting.vue'
 import DownloadLrcSetting from '../components/settings/DownloadLrcSetting.vue'
+import LoginSetting from '../components/settings/LoginSetting.vue'
 import * as musicApi from '../api/musicApi'
 import type { UpdateInfo } from '../types'
 
@@ -182,6 +197,10 @@ async function handleCheckUpdate() {
 
 .settings-section {
     margin-bottom: 24px;
+}
+
+.account-section {
+    margin-bottom: 32px;
 }
 
 .settings-section+.settings-section {

@@ -69,14 +69,16 @@ pub struct TaskContext {
 }
 
 /// 重试获取下载链接（网络错误时最多尝试 3 次）
+/// 传入 AppHandle，使下载链接获取函数能够读取登录态
 async fn fetch_download_link_with_retry(
+    app_handle: &AppHandle,
     song_mid: &str,
     filename: &str,
     task_id: &str,
 ) -> Result<(String, String), String> {
     let mut last_err = String::new();
     for attempt in 0..3 {
-        match api::get_download_link(song_mid, filename).await {
+        match api::get_download_link(app_handle, song_mid, filename).await {
             Ok(link) => return Ok(link),
             Err(e) => {
                 last_err = e;
@@ -488,8 +490,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
 
         // 如果没有有效链接，实时获取（首次进入或暂停恢复后）
         if url.is_empty() {
-            match fetch_download_link_with_retry(&ctx.song_mid, &ctx.quality_filename, &ctx.task_id)
-                .await
+            match fetch_download_link_with_retry(
+                &app_handle,
+                &ctx.song_mid,
+                &ctx.quality_filename,
+                &ctx.task_id,
+            )
+            .await
             {
                 Ok((new_url, new_key)) => {
                     url = new_url;

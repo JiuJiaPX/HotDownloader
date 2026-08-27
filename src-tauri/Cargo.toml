@@ -45,6 +45,14 @@ tauri-plugin-android-fs = "29.0.0"
 flate2 = "1.1.9"
 regex = "1.13.1"
 lofty = "0.22.2"
+async-tungstenite = { version = "0.32.1", features = [
+    "tokio-runtime",
+    "tokio-rustls-native-certs",
+] }
+rumqttc = "0.25.1"
+bytes = "1.12.1"
+rand = "0.9.5"
+rustls = { version = "0.23.43", features = ["ring"] }
 
 [profile.dev]
 incremental = true # 以较小的步骤编译您的二进制文件。
