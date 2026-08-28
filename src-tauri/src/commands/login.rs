@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tauri::{command, AppHandle};
 use tokio::sync::Mutex;
 
-use crate::commands::api;
+use crate::commands::api::client::CLIENT;
 use crate::storage::store_wrapper;
 
 /// MQTT 服务器主机名。
@@ -214,7 +214,7 @@ async fn login_api_call(
     }
 
     let body = build_http_body(module, method, param, comm);
-    let resp = api::CLIENT
+    let resp = CLIENT
         .post("https://u.y.qq.com/cgi-bin/musicu.fcg")
         .header("Referer", "https://y.qq.com/")
         .header("Origin", "https://y.qq.com")

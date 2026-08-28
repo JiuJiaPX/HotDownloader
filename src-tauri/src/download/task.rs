@@ -20,7 +20,8 @@ use tokio::sync::Mutex;
 
 use super::engine::TaskController;
 use super::progress;
-use crate::commands::api::{self}; // 获取下载链接
+use crate::commands::api::download; // 获取下载链接
+use crate::commands::api::client::CLIENT; // 全局 HTTP 客户端，用于下载封面
 use crate::commands::lyrics::{self, LyricResponse};
 use crate::utils::{crypto, filename};
 
@@ -78,7 +79,7 @@ async fn fetch_download_link_with_retry(
 ) -> Result<(String, String), String> {
     let mut last_err = String::new();
     for attempt in 0..3 {
-        match api::get_download_link(app_handle, song_mid, filename).await {
+        match download::get_download_link(app_handle, song_mid, filename).await {
             Ok(link) => return Ok(link),
             Err(e) => {
                 last_err = e;
@@ -126,7 +127,7 @@ async fn write_metadata(
 
     // 2. 下载封面图片字节
     let cover_bytes = if !cover_url.is_empty() {
-        match api::CLIENT.get(cover_url).send().await {
+        match CLIENT.get(cover_url).send().await {
             Ok(resp) if resp.status().is_success() => resp.bytes().await.ok().map(|b| b.to_vec()),
             _ => None,
         }
