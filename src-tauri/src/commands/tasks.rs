@@ -103,8 +103,8 @@ pub async fn check_download_path(
     };
     // 先获取下载设置，再调用路径解析函数，避免函数内部再次读取设置
     let (dir_setting, template_setting, saf_uri_setting, _, _) =
-        crate::download::task::get_download_settings(&app).await;
-    let (is_saf, download_dir, saf_folder_uri) = crate::download::task::resolve_download_path(
+        crate::download::task_path::get_download_settings(&app).await;
+    let (is_saf, download_dir, saf_folder_uri) = crate::download::task_path::resolve_download_path(
         &dir_setting,
         &template_setting,
         saf_uri_setting.as_deref(),

@@ -1,32 +1,28 @@
 use std::collections::VecDeque;
-use std::fs::{self, OpenOptions};
-use std::io::{BufWriter, Read, Seek, Write};
-use std::path::{Path, PathBuf};
+use std::fs::{self};
+use std::io::{BufWriter, Write};
+use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
-use lofty::config::WriteOptions;
-use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::picture::{Picture, PictureType};
-use lofty::tag::{ItemKey, Tag, TagType};
 use once_cell::sync::Lazy;
 use reqwest::header::{CONTENT_LENGTH, RANGE};
 use reqwest::StatusCode;
 use tauri::AppHandle;
-use tauri_plugin_android_fs::{AndroidFsExt, FileAccessMode, FsUri};
+use tauri_plugin_android_fs::{AndroidFsExt, FsUri};
 use tokio::sync::Mutex;
 
 use super::engine::TaskController;
 use super::progress;
-use crate::commands::api::client::CLIENT; // 全局 HTTP 客户端，用于下载封面
-use crate::commands::api::download; // 获取下载链接
-use crate::commands::lyrics::{self, LyricResponse};
-use crate::utils::{crypto, filename};
-
-/// 文件写入缓冲区容量（64 KB）
-const FILE_BUFFER_CAPACITY: usize = 64 * 1024;
+use super::task_fetch::{fetch_download_link_with_retry, is_retryable_network_error};
+use super::task_file::open_download_file;
+use super::task_lrc::write_lrc_file;
+use super::task_metadata::write_metadata;
+use super::task_path::{get_download_settings, resolve_download_path};
+use crate::commands::lyrics;
+use crate::utils::crypto;
 
 /// 下载专用 HTTP 客户端：不设总超时，避免大文件下载中断；设置读取超时 5 分钟
 static DOWNLOAD_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
@@ -69,382 +65,6 @@ pub struct TaskContext {
     pub final_path: Arc<Mutex<Option<String>>>, // 与控制器共享的文件路径
 }
 
-/// 重试获取下载链接（网络错误时最多尝试 3 次）
-/// 传入 AppHandle，使下载链接获取函数能够读取登录态
-async fn fetch_download_link_with_retry(
-    app_handle: &AppHandle,
-    song_mid: &str,
-    filename: &str,
-    task_id: &str,
-) -> Result<(String, String), String> {
-    let mut last_err = String::new();
-    for attempt in 0..3 {
-        match download::get_download_link(app_handle, song_mid, filename).await {
-            Ok(link) => return Ok(link),
-            Err(e) => {
-                last_err = e;
-                log::warn!(
-                    "任务 {} 获取下载链接失败 (尝试 {}/3): {}",
-                    task_id,
-                    attempt + 1,
-                    last_err
-                );
-                if attempt < 2 {
-                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
-                    // 1s, 2s, 4s
-                }
-            }
-        }
-    }
-    Err(last_err)
-}
-
-/// 判断错误是否属于可重试的网络类错误
-fn is_retryable_network_error(err: &reqwest::Error) -> bool {
-    err.is_timeout() || err.is_connect() || (err.is_request() && !err.is_body())
-}
-
-/// 将歌词与封面写入音频文件 metadata
-/// 普通模式直接操作文件路径；SAF 模式通过临时文件回写实现跨平台支持
-/// 错误时通过 progress::emit_metadata_error 发送提示事件，不阻断下载完成事件
-async fn write_metadata(
-    app_handle: &AppHandle,
-    task_id: &str,
-    file_path: &str,
-    is_saf: bool,
-    saf_file_uri: Option<String>,
-    cover_url: &str,
-    lyric: Option<LyricResponse>,
-) {
-    // 1. 从已获取的歌词响应中提取歌词内容：优先逐字歌词（elrc），其次普通歌词（lrc）
-    let lyric_text = lyric.and_then(|resp| {
-        // 优先级：逐字歌词（elrc） → 普通歌词（lrc）
-        if let Some(elrc) = resp.elrc.filter(|s| !s.trim().is_empty()) {
-            Some(elrc)
-        } else {
-            resp.lrc.filter(|s| !s.trim().is_empty())
-        }
-    });
-
-    // 2. 下载封面图片字节
-    let cover_bytes = if !cover_url.is_empty() {
-        match CLIENT.get(cover_url).send().await {
-            Ok(resp) if resp.status().is_success() => resp.bytes().await.ok().map(|b| b.to_vec()),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    if lyric_text.is_none() && cover_bytes.is_none() {
-        log::info!("无可用歌词或封面，跳过 metadata 写入");
-        return;
-    }
-
-    // 3. 准备本地临时路径：SAF 需先复制到临时文件
-    let temp_path = if is_saf {
-        let uri = match &saf_file_uri {
-            Some(u) => u.clone(),
-            None => {
-                log::warn!("SAF 文件 URI 缺失，无法写入 metadata");
-                progress::emit_metadata_error(app_handle, task_id, "SAF 文件 URI 缺失");
-                return;
-            }
-        };
-        let fs_uri = FsUri::from_uri(uri);
-        let api = app_handle.android_fs();
-
-        // 读取 SAF 文件并写入临时文件
-        let mut src = match api.open_file(&fs_uri, FileAccessMode::Read) {
-            Ok(f) => f,
-            Err(e) => {
-                log::warn!("打开 SAF 文件读取失败: {}", e);
-                progress::emit_metadata_error(
-                    app_handle,
-                    task_id,
-                    &format!("打开 SAF 文件读取失败: {}", e),
-                );
-                return;
-            }
-        };
-        let mut buf = Vec::new();
-        if let Err(e) = src.read_to_end(&mut buf) {
-            log::warn!("读取 SAF 文件失败: {}", e);
-            progress::emit_metadata_error(
-                app_handle,
-                task_id,
-                &format!("读取 SAF 文件失败: {}", e),
-            );
-            return;
-        }
-        // 从原始文件名提取扩展名，保证临时文件能被 lofty 正确识别格式
-        let ext = Path::new(file_path)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("tmp");
-        let temp = std::env::temp_dir().join(format!(
-            "{}.{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
-            ext
-        ));
-        if let Err(e) = std::fs::write(&temp, &buf) {
-            log::warn!("写入临时文件失败: {}", e);
-            progress::emit_metadata_error(app_handle, task_id, &format!("写入临时文件失败: {}", e));
-            return;
-        }
-        temp
-    } else {
-        PathBuf::from(file_path)
-    };
-
-    // 4. 修改 metadata
-    let mut tagged_file = match lofty::read_from_path(&temp_path) {
-        Ok(f) => f,
-        Err(e) => {
-            log::warn!("读取音频文件失败: {}", e);
-            if is_saf {
-                let _ = std::fs::remove_file(&temp_path);
-            }
-            progress::emit_metadata_error(app_handle, task_id, &format!("读取音频文件失败: {}", e));
-            return;
-        }
-    };
-
-    // 尽量保留 ID3v1 标签，仅当待写入歌词含有多字节字符（如中文）且文件存在 ID3v1 时，主动移除 ID3v1，避免 lofty 保存时因编码转换导致 panic。
-    let needs_remove_id3v1 = lyric_text
-        .as_ref()
-        .map_or(false, |text| text.chars().any(|c| c as u32 > 0xFF));
-    if needs_remove_id3v1 {
-        if tagged_file.remove(TagType::Id3v1).is_some() {
-            log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签");
-        }
-    }
-
-    // 确保存在主标签
-    let tag_type = tagged_file.primary_tag_type();
-    if tagged_file.primary_tag().is_none() {
-        // 没有主标签时创建对应类型的空标签
-        let new_tag = Tag::new(tag_type);
-        tagged_file.insert_tag(new_tag);
-    }
-
-    let tag = match tagged_file.primary_tag_mut() {
-        Some(t) => t,
-        None => {
-            log::warn!("无法获取音频标签，跳过写入");
-            if is_saf {
-                let _ = std::fs::remove_file(&temp_path);
-            }
-            progress::emit_metadata_error(app_handle, task_id, "无法获取音频标签");
-            return;
-        }
-    };
-
-    // 写入歌词
-    if let Some(lyric) = lyric_text {
-        tag.remove_key(&ItemKey::Lyrics);
-        tag.insert_text(ItemKey::Lyrics, lyric.clone());
-    }
-
-    // 写入封面
-    if let Some(bytes) = cover_bytes {
-        let picture = Picture::new_unchecked(
-            PictureType::CoverFront,
-            Some(lofty::picture::MimeType::Jpeg),
-            None,
-            bytes,
-        );
-        // 移除旧的封面图片，避免重复
-        tag.remove_picture_type(PictureType::CoverFront);
-        tag.push_picture(picture);
-    }
-
-    // 保存 metadata
-    if let Err(e) = tagged_file.save_to_path(&temp_path, WriteOptions::default()) {
-        log::warn!("保存 metadata 失败: {}", e);
-        if is_saf {
-            let _ = std::fs::remove_file(&temp_path);
-        }
-        progress::emit_metadata_error(app_handle, task_id, &format!("保存 metadata 失败: {}", e));
-        return;
-    } else {
-        log::info!("metadata 已写入: {}", temp_path.display());
-    }
-
-    // 5. SAF 模式：将临时文件写回原文件
-    if is_saf {
-        if let Some(uri) = saf_file_uri {
-            let fs_uri = FsUri::from_uri(uri);
-            let api = app_handle.android_fs();
-            match api.open_file(&fs_uri, FileAccessMode::ReadWrite) {
-                Ok(mut dst) => {
-                    let data = match std::fs::read(&temp_path) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            log::warn!("读取临时文件失败: {}", e);
-                            let _ = std::fs::remove_file(&temp_path);
-                            progress::emit_metadata_error(
-                                app_handle,
-                                task_id,
-                                &format!("读取临时文件失败: {}", e),
-                            );
-                            return;
-                        }
-                    };
-                    // 清空原文件并从头写入，避免旧数据残留
-                    if let Err(e) = dst.set_len(0) {
-                        log::warn!("清空 SAF 文件失败: {}", e);
-                        let _ = std::fs::remove_file(&temp_path);
-                        progress::emit_metadata_error(
-                            app_handle,
-                            task_id,
-                            &format!("清空 SAF 文件失败: {}", e),
-                        );
-                        return;
-                    }
-                    if let Err(e) = dst.seek(std::io::SeekFrom::Start(0)) {
-                        log::warn!("SAF 文件 seek 失败: {}", e);
-                        let _ = std::fs::remove_file(&temp_path);
-                        progress::emit_metadata_error(
-                            app_handle,
-                            task_id,
-                            &format!("SAF 文件 seek 失败: {}", e),
-                        );
-                        return;
-                    }
-                    if let Err(e) = dst.write_all(&data) {
-                        log::warn!("写入 SAF 文件失败: {}", e);
-                        let _ = std::fs::remove_file(&temp_path);
-                        progress::emit_metadata_error(
-                            app_handle,
-                            task_id,
-                            &format!("写入 SAF 文件失败: {}", e),
-                        );
-                        return;
-                    }
-                }
-                Err(e) => {
-                    log::warn!("打开 SAF 文件写入失败: {}", e);
-                    let _ = std::fs::remove_file(&temp_path);
-                    progress::emit_metadata_error(
-                        app_handle,
-                        task_id,
-                        &format!("打开 SAF 文件写入失败: {}", e),
-                    );
-                    return;
-                }
-            }
-        }
-        let _ = std::fs::remove_file(&temp_path);
-    }
-}
-
-/// 将普通 LRC 歌词写入与歌曲同名的 `.lrc` 文件。
-/// 支持普通模式与 SAF 模式，所有错误仅记录日志，不阻塞主下载流程。
-async fn write_lrc_file(
-    app_handle: &AppHandle,
-    lrc_content: &str,
-    song_file_path: &str,
-    is_saf: bool,
-    saf_folder_uri: Option<String>,
-) -> Option<String> {
-    // 提取歌曲文件名的 stem（不含扩展名）
-    let song_name = Path::new(song_file_path);
-    let stem = song_name
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown");
-
-    if !is_saf {
-        // 普通模式：与歌曲文件同目录，生成 .lrc 文件
-        let parent = song_name.parent().unwrap_or_else(|| Path::new("."));
-        let lrc_path = parent.join(format!("{}.lrc", stem));
-        if let Err(e) = fs::write(&lrc_path, lrc_content) {
-            log::warn!("写入 LRC 歌词文件失败 {}: {}", lrc_path.display(), e);
-            return None;
-        } else {
-            log::info!("LRC 歌词文件已保存: {}", lrc_path.display());
-            return Some(lrc_path.to_string_lossy().to_string());
-        }
-    }
-
-    // SAF 模式：在已授权的 SAF 目录中创建同名 .lrc 文件
-    let parent_uri = match saf_folder_uri.as_deref() {
-        Some(s) => match FsUri::from_json_str(s) {
-            Ok(uri) => uri,
-            Err(e) => {
-                log::warn!("解析 SAF 文件夹 URI 失败: {}", e);
-                return None;
-            }
-        },
-        None => {
-            log::warn!("SAF 文件夹 URI 缺失，无法创建 LRC 文件");
-            return None;
-        }
-    };
-
-    let lrc_file_name = format!("{}.lrc", stem);
-    let api = app_handle.android_fs();
-
-    // 尝试解析已存在的 LRC 文件，若存在则打开可写并清空；否则创建新文件
-    let file_path = std::path::Path::new(&lrc_file_name);
-    let file_uri_opt = api.resolve_file_uri(&parent_uri, file_path).ok();
-
-    match file_uri_opt {
-        Some(existing_uri) => {
-            // 文件已存在：打开并清空后写入
-            match api.open_file(&existing_uri, FileAccessMode::ReadWrite) {
-                Ok(mut f) => {
-                    if let Err(e) = f.set_len(0) {
-                        log::warn!("清空 LRC 文件失败: {}", e);
-                        return None;
-                    }
-                    if let Err(e) = f.seek(std::io::SeekFrom::Start(0)) {
-                        log::warn!("LRC 文件 seek 失败: {}", e);
-                        return None;
-                    }
-                    if let Err(e) = f.write_all(lrc_content.as_bytes()) {
-                        log::warn!("写入 LRC 歌词内容失败: {}", e);
-                        return None;
-                    }
-                    log::info!("SAF LRC 歌词文件已保存: {}", existing_uri.uri);
-                    Some(existing_uri.uri.clone())
-                }
-                Err(e) => {
-                    log::warn!("打开已有 LRC 文件失败: {}", e);
-                    None
-                }
-            }
-        }
-        None => {
-            // 文件不存在：创建新文件
-            match api.create_new_file(&parent_uri, file_path, None) {
-                Ok(new_uri) => match api.open_file_writable(&new_uri) {
-                    Ok(mut f) => {
-                        if let Err(e) = f.write_all(lrc_content.as_bytes()) {
-                            log::warn!("写入 LRC 歌词内容失败: {}", e);
-                            return None;
-                        }
-                        log::info!("SAF LRC 歌词文件已保存: {}", new_uri.uri);
-                        Some(new_uri.uri.clone())
-                    }
-                    Err(e) => {
-                        log::warn!("打开新 LRC 文件失败: {}", e);
-                        None
-                    }
-                },
-                Err(e) => {
-                    log::warn!("创建 LRC 文件失败: {}", e);
-                    None
-                }
-            }
-        }
-    }
-}
-
 /// 等待暂停恢复，返回 true 表示任务已被取消，应退出下载循环
 async fn wait_for_resume_async(controller: &TaskController) -> bool {
     loop {
@@ -468,6 +88,7 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
         write_metadata_enabled,
         download_lrc_enabled,
     ) = get_download_settings(&app_handle).await;
+
     // 1. 构建最终保存路径（只需一次）
     let (is_saf, download_dir, saf_folder_uri) = if !ctx.save_path.is_empty() {
         (false, ctx.save_path.clone(), None)
@@ -566,237 +187,30 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
 
         // 打开/续传文件
         if file.is_none() {
-            let f = if is_saf {
-                // SAF 模式
-                let api = app_handle.android_fs();
+            match open_download_file(
+                &app_handle,
+                &ctx.task_id,
+                &download_dir,
+                is_saf,
+                saf_folder_uri.as_deref(),
+                &mut downloaded,
+                &mut saf_file_uri,
+            )
+            .await
+            {
+                Some(f) => {
+                    file = Some(f);
 
-                // 解析父目录 FsUri（包含 document_top_tree_uri）
-                let parent_uri = match FsUri::from_json_str(saf_folder_uri.as_ref().unwrap()) {
-                    Ok(uri) => uri,
-                    Err(e) => {
-                        log::error!("解析 SAF 文件夹 URI 失败: {}", e);
-                        progress::emit_error(&app_handle, &ctx.task_id, "SAF 配置错误");
-                        break 'download;
-                    }
-                };
-
-                // download_dir 此时是文件名
-                let file_path = std::path::Path::new(&download_dir);
-
-                // 尝试解析已存在的文件
-                let existing_file_uri = api.resolve_file_uri(&parent_uri, file_path).ok();
-
-                match existing_file_uri {
-                    Some(file_uri) => {
-                        // 文件已存在，记录最终文件 URI
-                        saf_file_uri = Some(file_uri.uri.clone());
-
-                        if downloaded > 0 {
-                            // 续传模式：打开文件并校验大小后 seek 到偏移量
-                            match api.open_file(&file_uri, FileAccessMode::ReadWrite) {
-                                Ok(mut f) => {
-                                    use std::io::Seek;
-
-                                    // 校验文件大小：如果文件长度小于期望的偏移，说明文件异常，重置下载
-                                    let should_reset = match f.metadata() {
-                                        Ok(meta) => meta.len() < downloaded,
-                                        Err(_) => true, // 无法获取元数据，保守重置
-                                    };
-
-                                    if should_reset {
-                                        log::warn!(
-                                            "任务 {} SAF 文件大小异常，重置下载（期望偏移 {}，实际大小 {}）",
-                                            ctx.task_id,
-                                            downloaded,
-                                            f.metadata().map(|m| m.len()).unwrap_or(0)
-                                        );
-                                        // 清空文件并从头下载
-                                        if let Err(e) = f.set_len(0) {
-                                            log::error!("SAF 文件截断失败: {}", e);
-                                            progress::emit_error(
-                                                &app_handle,
-                                                &ctx.task_id,
-                                                "文件异常，请重试",
-                                            );
-                                            break 'download;
-                                        }
-                                        if let Err(e) = f.seek(std::io::SeekFrom::Start(0)) {
-                                            log::error!("SAF 文件 seek 失败: {}", e);
-                                            progress::emit_error(
-                                                &app_handle,
-                                                &ctx.task_id,
-                                                "文件定位失败",
-                                            );
-                                            break 'download;
-                                        }
-                                        downloaded = 0;
-                                    } else {
-                                        // 文件大小正常，seek 到续传位置
-                                        if let Err(e) = f.seek(std::io::SeekFrom::Start(downloaded))
-                                        {
-                                            log::error!("SAF 文件 seek 失败: {}", e);
-                                            progress::emit_error(
-                                                &app_handle,
-                                                &ctx.task_id,
-                                                "文件定位失败",
-                                            );
-                                            break 'download;
-                                        }
-                                    }
-                                    Some(f)
-                                }
-                                Err(e) => {
-                                    log::error!("SAF 打开文件失败: {}", e);
-                                    progress::emit_error(&app_handle, &ctx.task_id, "无法打开文件");
-                                    break 'download;
-                                }
-                            }
-                        } else {
-                            // 从头开始：截断文件
-                            match api.open_file_writable(&file_uri) {
-                                Ok(f) => Some(f),
-                                Err(e) => {
-                                    log::error!("SAF 打开文件失败: {}", e);
-                                    progress::emit_error(&app_handle, &ctx.task_id, "无法打开文件");
-                                    break 'download;
-                                }
-                            }
+                    // 更新 final_path：SAF 模式为 URI，普通模式为普通路径
+                    if is_saf {
+                        if let Some(uri) = saf_file_uri.clone() {
+                            *controller.final_path.lock().await = Some(uri);
                         }
-                    }
-                    None => {
-                        // 文件不存在，创建新文件
-                        match api.create_new_file(&parent_uri, file_path, None) {
-                            Ok(file_uri) => {
-                                saf_file_uri = Some(file_uri.uri.clone());
-                                // 新文件，重置偏移量
-                                if downloaded > 0 {
-                                    downloaded = 0;
-                                }
-                                match api.open_file_writable(&file_uri) {
-                                    Ok(f) => Some(f),
-                                    Err(e) => {
-                                        log::error!("SAF 打开新文件失败: {}", e);
-                                        progress::emit_error(
-                                            &app_handle,
-                                            &ctx.task_id,
-                                            "无法打开文件",
-                                        );
-                                        break 'download;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                log::error!("SAF 创建文件失败: {}", e);
-                                progress::emit_error(&app_handle, &ctx.task_id, "无法创建文件");
-                                break 'download;
-                            }
-                        }
+                    } else {
+                        *controller.final_path.lock().await = Some(download_dir.clone());
                     }
                 }
-            } else {
-                // 普通模式：原有逻辑
-                if downloaded == 0 {
-                    match OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(&download_dir)
-                    {
-                        Ok(f) => Some(f),
-                        Err(e) => {
-                            log::error!("文件创建失败: {}", e);
-                            progress::emit_error(
-                                &app_handle,
-                                &ctx.task_id,
-                                "文件创建失败，请检查磁盘空间",
-                            );
-                            break 'download;
-                        }
-                    }
-                } else {
-                    // 续传任务，先以追加模式打开
-                    match OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&download_dir)
-                    {
-                        Ok(f) => {
-                            // 校验文件大小：如果文件长度小于期望的偏移，说明文件异常，重置下载
-                            if let Ok(meta) = f.metadata() {
-                                if meta.len() < downloaded {
-                                    // 文件被截断或损坏，清空文件并从头下载
-                                    drop(f); // 先关闭文件，避免占用
-                                    match OpenOptions::new()
-                                        .write(true)
-                                        .create(true)
-                                        .truncate(true)
-                                        .open(&download_dir)
-                                    {
-                                        Ok(new_f) => {
-                                            downloaded = 0;
-                                            Some(new_f)
-                                        }
-                                        Err(e) => {
-                                            log::error!("文件重置失败: {}", e);
-                                            progress::emit_error(
-                                                &app_handle,
-                                                &ctx.task_id,
-                                                "文件异常，请重试",
-                                            );
-                                            break 'download;
-                                        }
-                                    }
-                                } else {
-                                    Some(f)
-                                }
-                            } else {
-                                // 无法获取元数据，保守起见改为从头下载
-                                drop(f);
-                                match OpenOptions::new()
-                                    .write(true)
-                                    .create(true)
-                                    .truncate(true)
-                                    .open(&download_dir)
-                                {
-                                    Ok(new_f) => {
-                                        downloaded = 0;
-                                        Some(new_f)
-                                    }
-                                    Err(e) => {
-                                        log::error!("文件重置失败: {}", e);
-                                        progress::emit_error(
-                                            &app_handle,
-                                            &ctx.task_id,
-                                            "文件异常，请重试",
-                                        );
-                                        break 'download;
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("文件打开失败: {}", e);
-                            progress::emit_error(&app_handle, &ctx.task_id, "文件访问失败");
-                            break 'download;
-                        }
-                    }
-                }
-            };
-
-            if let Some(f) = f {
-                // 包装为 BufWriter，减少磁盘 IO 次数
-                file = Some(BufWriter::with_capacity(FILE_BUFFER_CAPACITY, f));
-
-                // 更新 final_path：SAF 模式为 URI，普通模式为普通路径
-                if is_saf {
-                    if let Some(uri) = saf_file_uri.clone() {
-                        *controller.final_path.lock().await = Some(uri);
-                    }
-                } else {
-                    *controller.final_path.lock().await = Some(download_dir.clone());
-                }
-            } else {
-                break 'download;
+                None => break 'download,
             }
         }
 
@@ -1097,115 +511,5 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
                 log::info!("文件已成功删除: {}", download_dir);
             }
         }
-    }
-}
-
-// ==================== 辅助函数 ====================
-
-/// 获取下载目录（绝对路径）及文件命名模板
-pub(crate) async fn get_download_settings(
-    app_handle: &AppHandle,
-) -> (String, String, Option<String>, bool, bool) {
-    use crate::storage::store_wrapper;
-
-    let default_dir = crate::commands::file_ops::get_default_download_dir_impl(app_handle);
-    let default_template = "{song} - {artist}".to_string();
-
-    let settings_json = store_wrapper::load_string(app_handle, "settings").unwrap_or_default();
-    let settings: serde_json::Value =
-        serde_json::from_str(&settings_json).unwrap_or(serde_json::json!({}));
-
-    let dir = settings
-        .get("downloadDir")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| default_dir.clone());
-
-    // 过滤无效路径（Android 应用私有目录）
-    let dir = if dir.contains("/data/user/0/") || dir.contains("/data/data/") {
-        log::warn!("检测到应用私有目录路径，已回退为默认下载目录: {}", dir);
-        default_dir
-    } else if Path::new(&dir).is_absolute() || dir == "saf://" {
-        dir
-    } else {
-        log::warn!(
-            "下载目录不是绝对路径，已回退为默认下载目录: {}",
-            default_dir
-        );
-        default_dir
-    };
-
-    let saf_folder_uri = settings
-        .get("safFolderUri")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
-
-    let template = settings
-        .get("namingTemplate")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&default_template)
-        .to_string();
-
-    // 是否写入歌曲标签（歌词/封面）
-    let write_metadata_enabled = settings
-        .get("writeMetadata")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    // 是否单独下载 LRC 歌词文件
-    let download_lrc_enabled = settings
-        .get("downloadLrc")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    (
-        dir,
-        template,
-        saf_folder_uri,
-        write_metadata_enabled,
-        download_lrc_enabled,
-    )
-}
-
-/// 解析最终下载路径。
-/// 根据传入的设置、模板和歌曲信息，返回是否为 SAF 模式、最终路径或文件名、SAF 文件夹 URI。
-/// 该函数不负责读取设置，由调用方提供，避免重复调用 `get_download_settings`。
-pub(crate) fn resolve_download_path(
-    dir_setting: &str,
-    template_setting: &str,
-    saf_uri_setting: Option<&str>,
-    song_info: &super::task::SongInfo,
-    quality_filename: &str,
-) -> (bool, String, Option<String>) {
-    if dir_setting == "saf://" && cfg!(target_os = "android") && saf_uri_setting.is_some() {
-        let fname = filename::build_filename(template_setting, song_info);
-        let raw_ext = Path::new(quality_filename)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("flac");
-        let ext = map_decrypted_extension(raw_ext);
-        let file_name = format!("{}.{}", fname, ext);
-        (true, file_name, saf_uri_setting.map(|s| s.to_string()))
-    } else {
-        let fname = filename::build_filename(template_setting, song_info);
-        let raw_ext = Path::new(quality_filename)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("flac");
-        let ext = map_decrypted_extension(raw_ext);
-        let full_path = Path::new(dir_setting).join(format!("{}.{}", fname, ext));
-        (false, full_path.to_string_lossy().to_string(), None)
-    }
-}
-
-/// 将加密文件扩展名映射为解密后的真实扩展名
-pub(crate) fn map_decrypted_extension(ext: &str) -> &str {
-    match ext {
-        "mgg" => "ogg",
-        "mflac" => "flac",
-        // 未知则保持原样
-        _ => ext,
     }
 }
