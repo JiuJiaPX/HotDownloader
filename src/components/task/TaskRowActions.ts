@@ -15,6 +15,11 @@ export function renderActions(
     const taskId = task.id
     const nodes: VNode[] = []
 
+    // 处理中：不提供任何操作，避免中断元数据写入或歌词处理
+    if (task.status === 'processing') {
+        return nodes
+    }
+
     // 等待中：取消（可能文件尚未创建，但用户可选择同时删除潜在的空文件）
     if (task.status === 'waiting') {
         nodes.push(

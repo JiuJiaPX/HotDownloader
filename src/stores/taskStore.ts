@@ -8,6 +8,8 @@ import type {
     DownloadCompletedPayload,
     DownloadErrorPayload,
     DownloadLinkExpiredPayload,
+    DownloadFileCompletePayload,
+    DownloadMetadataErrorPayload
 } from '../types'
 import { QUALITY_DOWNGRADE_ORDER } from '../types'
 import { useSettingsStore } from './settingsStore'
@@ -219,6 +221,26 @@ export const useTaskStore = defineStore('tasks', () => {
                 task.status = 'downloading'
             }
             saveTasks()
+        })
+
+        // 监听文件下载完成，进入处理中状态
+        listen<DownloadFileCompletePayload>('download-file-complete', (event) => {
+            const task = tasks.value.find((t) => t.id === event.payload.task_id)
+            if (!task) return
+            task.downloaded = task.fileSize
+            task.status = 'processing'
+            saveTasks()
+        })
+
+        // 监听元数据写入失败
+        listen<DownloadMetadataErrorPayload>('download-metadata-error', (event) => {
+            const task = tasks.value.find((t) => t.id === event.payload.task_id)
+            if (!task) return
+            notify()?.warning({
+                title: '元数据写入失败',
+                description: `歌曲“${task.songTitle}”元数据写入失败：${event.payload.error_msg}`,
+                duration: 3000
+            })
         })
 
         // 监听下载完成

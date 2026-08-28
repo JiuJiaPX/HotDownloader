@@ -20,7 +20,7 @@ export const QUALITY_DOWNGRADE_ORDER: string[] = [...ALL_QUALITY_ORDER].reverse(
 
 export type Quality = string  // 不再限制字面量，兼容所有后端标签
 
-export type TaskStatus = 'waiting' | 'downloading' | 'paused' | 'completed' | 'error'
+export type TaskStatus = 'waiting' | 'downloading' | 'paused' | 'completed' | 'error' | 'processing'
 
 export interface Settings {
     defaultQuality: Quality
@@ -192,4 +192,15 @@ export interface UpdateAsset {
     name: string
     browser_download_url: string
     size: number
+}
+
+// 文件下载完成、处理中事件载荷
+export interface DownloadFileCompletePayload {
+    task_id: string
+}
+
+// 元数据写入失败事件载荷
+export interface DownloadMetadataErrorPayload {
+    task_id: string
+    error_msg: string
 }

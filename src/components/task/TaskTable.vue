@@ -83,8 +83,8 @@ function formatSpeed(bytesPerSec: number): string {
 function renderProgress(row: TaskRecord) {
     const percent = row.fileSize > 0 ? Math.round((row.downloaded / row.fileSize) * 100) : 0
 
-    // 已完成状态
-    if (row.status === 'completed') {
+    // 已完成或处理中状态：显示100%
+    if (row.status === 'completed' || row.status === 'processing') {
         return '100%'
     }
 
@@ -154,6 +154,7 @@ const columns: DataTableColumn<TaskRecord>[] = [
                 paused: { type: 'warning', label: '暂停' },
                 completed: { type: 'success', label: '已完成' },
                 error: { type: 'error', label: '错误' },
+                processing: { type: 'info', label: '处理中' },
             }
             const s = statusMap[row.status] || { type: 'default', label: row.status }
             return h(NTag, { type: s.type as any, size: 'small' }, () => s.label)

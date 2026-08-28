@@ -20,8 +20,8 @@ use tokio::sync::Mutex;
 
 use super::engine::TaskController;
 use super::progress;
-use crate::commands::api::download; // 获取下载链接
 use crate::commands::api::client::CLIENT; // 全局 HTTP 客户端，用于下载封面
+use crate::commands::api::download; // 获取下载链接
 use crate::commands::lyrics::{self, LyricResponse};
 use crate::utils::{crypto, filename};
 
@@ -106,9 +106,10 @@ fn is_retryable_network_error(err: &reqwest::Error) -> bool {
 
 /// 将歌词与封面写入音频文件 metadata
 /// 普通模式直接操作文件路径；SAF 模式通过临时文件回写实现跨平台支持
-/// 所有错误仅记录日志，不阻止下载完成事件的发送
+/// 错误时通过 progress::emit_metadata_error 发送提示事件，不阻断下载完成事件
 async fn write_metadata(
     app_handle: &AppHandle,
+    task_id: &str,
     file_path: &str,
     is_saf: bool,
     saf_file_uri: Option<String>,
@@ -146,6 +147,7 @@ async fn write_metadata(
             Some(u) => u.clone(),
             None => {
                 log::warn!("SAF 文件 URI 缺失，无法写入 metadata");
+                progress::emit_metadata_error(app_handle, task_id, "SAF 文件 URI 缺失");
                 return;
             }
         };
@@ -157,16 +159,25 @@ async fn write_metadata(
             Ok(f) => f,
             Err(e) => {
                 log::warn!("打开 SAF 文件读取失败: {}", e);
+                progress::emit_metadata_error(
+                    app_handle,
+                    task_id,
+                    &format!("打开 SAF 文件读取失败: {}", e),
+                );
                 return;
             }
         };
         let mut buf = Vec::new();
         if let Err(e) = src.read_to_end(&mut buf) {
             log::warn!("读取 SAF 文件失败: {}", e);
+            progress::emit_metadata_error(
+                app_handle,
+                task_id,
+                &format!("读取 SAF 文件失败: {}", e),
+            );
             return;
         }
         // 从原始文件名提取扩展名，保证临时文件能被 lofty 正确识别格式
-        // 例如原始文件为 "xxx.flac"，则临时文件使用 ".flac" 后缀
         let ext = Path::new(file_path)
             .extension()
             .and_then(|s| s.to_str())
@@ -181,6 +192,7 @@ async fn write_metadata(
         ));
         if let Err(e) = std::fs::write(&temp, &buf) {
             log::warn!("写入临时文件失败: {}", e);
+            progress::emit_metadata_error(app_handle, task_id, &format!("写入临时文件失败: {}", e));
             return;
         }
         temp
@@ -196,6 +208,7 @@ async fn write_metadata(
             if is_saf {
                 let _ = std::fs::remove_file(&temp_path);
             }
+            progress::emit_metadata_error(app_handle, task_id, &format!("读取音频文件失败: {}", e));
             return;
         }
     };
@@ -206,7 +219,7 @@ async fn write_metadata(
         .map_or(false, |text| text.chars().any(|c| c as u32 > 0xFF));
     if needs_remove_id3v1 {
         if tagged_file.remove(TagType::Id3v1).is_some() {
-            log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签，避免写入多字节字符时出错");
+            log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签");
         }
     }
 
@@ -225,6 +238,7 @@ async fn write_metadata(
             if is_saf {
                 let _ = std::fs::remove_file(&temp_path);
             }
+            progress::emit_metadata_error(app_handle, task_id, "无法获取音频标签");
             return;
         }
     };
@@ -251,6 +265,11 @@ async fn write_metadata(
     // 保存 metadata
     if let Err(e) = tagged_file.save_to_path(&temp_path, WriteOptions::default()) {
         log::warn!("保存 metadata 失败: {}", e);
+        if is_saf {
+            let _ = std::fs::remove_file(&temp_path);
+        }
+        progress::emit_metadata_error(app_handle, task_id, &format!("保存 metadata 失败: {}", e));
+        return;
     } else {
         log::info!("metadata 已写入: {}", temp_path.display());
     }
@@ -267,6 +286,11 @@ async fn write_metadata(
                         Err(e) => {
                             log::warn!("读取临时文件失败: {}", e);
                             let _ = std::fs::remove_file(&temp_path);
+                            progress::emit_metadata_error(
+                                app_handle,
+                                task_id,
+                                &format!("读取临时文件失败: {}", e),
+                            );
                             return;
                         }
                     };
@@ -274,19 +298,43 @@ async fn write_metadata(
                     if let Err(e) = dst.set_len(0) {
                         log::warn!("清空 SAF 文件失败: {}", e);
                         let _ = std::fs::remove_file(&temp_path);
+                        progress::emit_metadata_error(
+                            app_handle,
+                            task_id,
+                            &format!("清空 SAF 文件失败: {}", e),
+                        );
                         return;
                     }
                     if let Err(e) = dst.seek(std::io::SeekFrom::Start(0)) {
                         log::warn!("SAF 文件 seek 失败: {}", e);
                         let _ = std::fs::remove_file(&temp_path);
+                        progress::emit_metadata_error(
+                            app_handle,
+                            task_id,
+                            &format!("SAF 文件 seek 失败: {}", e),
+                        );
                         return;
                     }
                     if let Err(e) = dst.write_all(&data) {
                         log::warn!("写入 SAF 文件失败: {}", e);
+                        let _ = std::fs::remove_file(&temp_path);
+                        progress::emit_metadata_error(
+                            app_handle,
+                            task_id,
+                            &format!("写入 SAF 文件失败: {}", e),
+                        );
+                        return;
                     }
                 }
                 Err(e) => {
                     log::warn!("打开 SAF 文件写入失败: {}", e);
+                    let _ = std::fs::remove_file(&temp_path);
+                    progress::emit_metadata_error(
+                        app_handle,
+                        task_id,
+                        &format!("打开 SAF 文件写入失败: {}", e),
+                    );
+                    return;
                 }
             }
         }
@@ -957,6 +1005,9 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
 
     // 下载成功后，根据设置决定是否写入 metadata（歌词/封面）
     if completed_ok {
+        // 文件下载完成，发送事件，前端进入 processing 状态
+        progress::emit_file_complete(&app_handle, &ctx.task_id);
+
         // 获取歌词（仅当需要写入 metadata 或单独下载 lrc 时才请求）
         let lyric_resp = if write_metadata_enabled || download_lrc_enabled {
             match lyrics::get_lyric_by_id(ctx.song_id).await {
@@ -970,10 +1021,11 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             None
         };
 
-        // 写入音频文件 metadata（歌词/封面）
+        // 写入音频文件 metadata（歌词/封面），错误处理在函数内部完成
         if write_metadata_enabled {
             write_metadata(
                 &app_handle,
+                &ctx.task_id,
                 &download_dir,
                 is_saf,
                 saf_file_uri.clone(),
@@ -1006,7 +1058,7 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             }
         }
 
-        // 无论 metadata 是否写入成功，均发送下载完成事件
+        // 全部处理完成，发送下载完成事件
         let final_display_path = if is_saf {
             saf_file_uri.clone().unwrap_or_else(|| download_dir.clone())
         } else {

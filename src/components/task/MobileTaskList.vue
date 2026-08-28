@@ -47,7 +47,7 @@ export default defineComponent({
 
         // 进度百分比
         function progressPercent(task: TaskRecord): number {
-            if (task.status === 'completed') return 100
+            if (task.status === 'completed' || task.status === 'processing') return 100
             if (task.fileSize > 0) {
                 return Math.min(100, Math.round((task.downloaded / task.fileSize) * 100))
             }
@@ -61,6 +61,7 @@ export default defineComponent({
             paused: { type: 'warning', label: '暂停' },
             completed: { type: 'success', label: '已完成' },
             error: { type: 'error', label: '错误' },
+            processing: { type: 'info', label: '处理中' },
         }
 
         // 操作按钮 VNode 数组

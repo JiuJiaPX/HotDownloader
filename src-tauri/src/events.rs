@@ -4,6 +4,10 @@ pub const DOWNLOAD_PROGRESS: &str = "download-progress";
 pub const DOWNLOAD_COMPLETED: &str = "download-completed";
 pub const DOWNLOAD_ERROR: &str = "download-error";
 pub const DOWNLOAD_LINK_EXPIRED: &str = "download-link-expired";
+// 文件下载完成，正在处理元数据/歌词
+pub const DOWNLOAD_FILE_COMPLETE: &str = "download-file-complete";
+// 元数据写入失败（仅提示，不阻断完成）
+pub const DOWNLOAD_METADATA_ERROR: &str = "download-metadata-error";
 
 #[derive(Serialize, Clone)]
 pub struct DownloadProgressPayload {
@@ -30,4 +34,17 @@ pub struct DownloadErrorPayload {
 pub struct DownloadLinkExpiredPayload {
     pub task_id: String,
     pub current_offset: u64,
+}
+
+// 文件下载完成，处理中事件载荷
+#[derive(Serialize, Clone)]
+pub struct DownloadFileCompletePayload {
+    pub task_id: String,
+}
+
+// 元数据写入失败事件载荷
+#[derive(Serialize, Clone)]
+pub struct DownloadMetadataErrorPayload {
+    pub task_id: String,
+    pub error_msg: String,
 }

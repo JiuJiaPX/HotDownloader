@@ -46,3 +46,21 @@ pub fn emit_link_expired(app_handle: &AppHandle, task_id: &str, current_offset: 
     };
     let _ = app_handle.emit(events::DOWNLOAD_LINK_EXPIRED, payload);
 }
+
+/// 发送文件下载完成、进入处理中状态的事件
+/// 前端收到后将任务状态置为 processing，进度自动显示 100%
+pub fn emit_file_complete(app_handle: &AppHandle, task_id: &str) {
+    let payload = events::DownloadFileCompletePayload {
+        task_id: task_id.to_string(),
+    };
+    let _ = app_handle.emit(events::DOWNLOAD_FILE_COMPLETE, payload);
+}
+
+/// 发送元数据写入失败事件，前端弹出警告提示
+pub fn emit_metadata_error(app_handle: &AppHandle, task_id: &str, error_msg: &str) {
+    let payload = events::DownloadMetadataErrorPayload {
+        task_id: task_id.to_string(),
+        error_msg: error_msg.to_string(),
+    };
+    let _ = app_handle.emit(events::DOWNLOAD_METADATA_ERROR, payload);
+}
