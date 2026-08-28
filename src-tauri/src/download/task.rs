@@ -164,8 +164,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
                     log::info!("任务 {} 获取到新下载链接", ctx.task_id);
                 }
                 Err(e) => {
+                    // 将具体错误信息发送到前端，便于用户了解失败原因
                     log::error!("任务 {} 最终获取下载链接失败: {}", ctx.task_id, e);
-                    progress::emit_error(&app_handle, &ctx.task_id, "网络错误，请稍后重试");
+                    progress::emit_error(
+                        &app_handle,
+                        &ctx.task_id,
+                        &format!("获取下载链接失败: {}", e),
+                    );
                     break 'download;
                 }
             }
@@ -238,8 +243,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
                         tokio::time::sleep(Duration::from_secs(1 << (attempt - 1))).await;
                         continue;
                     } else {
+                        // 发送具体请求错误（如连接超时、TLS 错误等）到前端
                         log::error!("任务 {} 最终下载请求失败: {}", ctx.task_id, e);
-                        progress::emit_error(&app_handle, &ctx.task_id, "网络错误，请稍后重试");
+                        progress::emit_error(
+                            &app_handle,
+                            &ctx.task_id,
+                            &format!("下载请求失败: {}", e),
+                        );
                         break 'download;
                     }
                 }
@@ -270,8 +280,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             // 刷新缓冲区
             if let Some(ref mut f) = file {
                 if let Err(e) = f.flush() {
+                    // 刷新缓冲区失败时告知具体原因（如磁盘 I/O 错误）
                     log::error!("刷新文件缓冲区失败: {}", e);
-                    progress::emit_error(&app_handle, &ctx.task_id, "写入文件失败");
+                    progress::emit_error(
+                        &app_handle,
+                        &ctx.task_id,
+                        &format!("刷新文件缓冲区失败: {}", e),
+                    );
                     break 'download;
                 }
             }
@@ -286,8 +301,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             {
                 progress::emit_link_expired(&app_handle, &ctx.task_id, downloaded);
             } else {
+                // 将 StatusCode 格式化后作为错误消息的一部分，让用户知道具体的 HTTP 状态码
                 log::error!("任务 {} 服务器错误: {}", ctx.task_id, status);
-                progress::emit_error(&app_handle, &ctx.task_id, "服务器错误，请稍后重试");
+                progress::emit_error(
+                    &app_handle,
+                    &ctx.task_id,
+                    &format!("服务器错误: HTTP {}", status),
+                );
             }
             break 'download;
         }
@@ -322,7 +342,12 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
                         stream_retries += 1;
                         should_retry_stream = true;
                     } else {
-                        progress::emit_error(&app_handle, &ctx.task_id, "网络错误，请稍后重试");
+                        // 流读取失败（如连接重置、超时）时告知用户具体原因
+                        progress::emit_error(
+                            &app_handle,
+                            &ctx.task_id,
+                            &format!("读取流错误: {}", e),
+                        );
                     }
                     break;
                 }
@@ -339,8 +364,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             // 写入文件
             if let Some(ref mut f) = file {
                 if let Err(e) = f.write_all(&chunk_data) {
+                    // 写入文件失败时提供具体错误
                     log::error!("写入文件错误: {}", e);
-                    progress::emit_error(&app_handle, &ctx.task_id, "写入文件失败");
+                    progress::emit_error(
+                        &app_handle,
+                        &ctx.task_id,
+                        &format!("写入文件失败: {}", e),
+                    );
                     break 'download;
                 }
             }
@@ -377,8 +407,13 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
                 // 刷新缓冲区
                 if let Some(ref mut f) = file {
                     if let Err(e) = f.flush() {
+                        // 最终刷新失败时提供具体错误
                         log::error!("刷新文件缓冲区失败: {}", e);
-                        progress::emit_error(&app_handle, &ctx.task_id, "写入文件失败");
+                        progress::emit_error(
+                            &app_handle,
+                            &ctx.task_id,
+                            &format!("刷新文件缓冲区失败: {}", e),
+                        );
                         break 'download;
                     }
                 }

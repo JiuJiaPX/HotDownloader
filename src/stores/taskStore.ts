@@ -268,10 +268,15 @@ export const useTaskStore = defineStore('tasks', () => {
             task.status = 'error'
             task.errorMsg = event.payload.error_msg
             saveTasks()
+            // 错误信息可能包含底层网络细节（如长 URL、堆栈等），过长会撑坏通知 UI，故截断显示
+            const maxLen = 100
+            const displayMsg = event.payload.error_msg.length > maxLen
+                ? event.payload.error_msg.slice(0, maxLen) + '...'
+                : event.payload.error_msg
             // 弹出错误通知
             notify()?.error({
                 title: '下载失败',
-                description: `歌曲“${task.songTitle}”错误：${event.payload.error_msg}`,
+                description: `歌曲“${task.songTitle}”错误：${displayMsg}`,
                 duration: 3000
             })
         })
