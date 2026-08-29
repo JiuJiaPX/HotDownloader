@@ -11,6 +11,9 @@ import './style.css'
 const app = createApp(App)
 const pinia = createPinia()
 
+// 保存任务事件监听的清理函数，用于在应用退出时注销监听器
+let cleanupTaskListeners: (() => void) | null = null
+
 app.use(pinia)
 app.use(router)
 app.use(naive)
@@ -33,7 +36,8 @@ async function init() {
 
     // 设置下载事件监听（内部已处理错误）
     try {
-        taskStore.setupListeners()
+        // 保存清理函数，并在页面卸载时调用，避免内存泄漏
+        cleanupTaskListeners = taskStore.setupListeners()
     } catch (e) {
         console.error('注册下载事件监听失败:', e)
     }
@@ -41,4 +45,12 @@ async function init() {
 
 init().finally(() => {
     app.mount('#app')
+
+    // 在窗口关闭或刷新前执行清理函数，移除事件监听器
+    window.addEventListener('beforeunload', () => {
+        if (cleanupTaskListeners) {
+            cleanupTaskListeners()
+            cleanupTaskListeners = null
+        }
+    })
 })

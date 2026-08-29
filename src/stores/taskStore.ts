@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
     TaskRecord,
     DownloadProgressPayload,
@@ -209,92 +209,117 @@ export const useTaskStore = defineStore('tasks', () => {
     }
 
     // ---- 事件监听 ----
-    function setupListeners() {
-        listen<DownloadProgressPayload>('download-progress', (event) => {
-            const task = tasks.value.find((t) => t.id === event.payload.task_id)
-            if (!task) return
-            task.downloaded = event.payload.downloaded
-            task.fileSize = event.payload.total
-            task.speed = event.payload.speed   // 保存速度
-            // 如果任务尚未处于 downloading，则切换为 downloading
-            if (task.status !== 'downloading') {
-                task.status = 'downloading'
-            }
-            saveTasks()
-        })
+    // 收集所有事件监听器返回的取消函数，并返回一个清理函数用于统一清理，避免内存泄漏和重复监听
+    function setupListeners(): () => void {
+        const unlisteners: Array<Promise<UnlistenFn>> = []
+
+        unlisteners.push(
+            listen<DownloadProgressPayload>('download-progress', (event) => {
+                const task = tasks.value.find((t) => t.id === event.payload.task_id)
+                if (!task) return
+                task.downloaded = event.payload.downloaded
+                task.fileSize = event.payload.total
+                task.speed = event.payload.speed   // 保存速度
+                // 如果任务尚未处于 downloading，则切换为 downloading
+                if (task.status !== 'downloading') {
+                    task.status = 'downloading'
+                }
+                saveTasks()
+            })
+        )
 
         // 监听文件下载完成，进入处理中状态
-        listen<DownloadFileCompletePayload>('download-file-complete', (event) => {
-            const task = tasks.value.find((t) => t.id === event.payload.task_id)
-            if (!task) return
-            task.downloaded = task.fileSize
-            task.status = 'processing'
-            saveTasks()
-        })
+        unlisteners.push(
+            listen<DownloadFileCompletePayload>('download-file-complete', (event) => {
+                const task = tasks.value.find((t) => t.id === event.payload.task_id)
+                if (!task) return
+                task.downloaded = task.fileSize
+                task.status = 'processing'
+                saveTasks()
+            })
+        )
 
         // 监听元数据写入失败
-        listen<DownloadMetadataErrorPayload>('download-metadata-error', (event) => {
-            const task = tasks.value.find((t) => t.id === event.payload.task_id)
-            if (!task) return
-            notify()?.warning({
-                title: '元数据写入失败',
-                description: `歌曲“${task.songTitle}”元数据写入失败：${event.payload.error_msg}`,
-                duration: 3000
+        unlisteners.push(
+            listen<DownloadMetadataErrorPayload>('download-metadata-error', (event) => {
+                const task = tasks.value.find((t) => t.id === event.payload.task_id)
+                if (!task) return
+                notify()?.warning({
+                    title: '元数据写入失败',
+                    description: `歌曲“${task.songTitle}”元数据写入失败：${event.payload.error_msg}`,
+                    duration: 3000
+                })
             })
-        })
+        )
 
         // 监听下载完成
-        listen<DownloadCompletedPayload>('download-completed', (event) => {
-            const task = tasks.value.find((t) => t.id === event.payload.task_id)
-            if (!task) return
+        unlisteners.push(
+            listen<DownloadCompletedPayload>('download-completed', (event) => {
+                const task = tasks.value.find((t) => t.id === event.payload.task_id)
+                if (!task) return
 
-            task.status = 'completed'
-            // SAF 模式下 final_path 已经是完整 URI，无需额外处理
-            task.filePath = event.payload.final_path
-            task.downloaded = task.fileSize
+                task.status = 'completed'
+                // SAF 模式下 final_path 已经是完整 URI，无需额外处理
+                task.filePath = event.payload.final_path
+                task.downloaded = task.fileSize
 
-            saveTasks()
-            // 成功通知
-            notify()?.success({
-                title: '下载完成',
-                description: `歌曲“${task.songTitle}”已下载完成`,
-                duration: 3000
+                saveTasks()
+                // 成功通知
+                notify()?.success({
+                    title: '下载完成',
+                    description: `歌曲“${task.songTitle}”已下载完成`,
+                    duration: 3000
+                })
             })
-        })
+        )
 
-        listen<DownloadErrorPayload>('download-error', (event) => {
-            const task = tasks.value.find((t) => t.id === event.payload.task_id)
-            if (!task) return
-            task.status = 'error'
-            task.errorMsg = event.payload.error_msg
-            saveTasks()
-            // 错误信息可能包含底层网络细节（如长 URL、堆栈等），过长会撑坏通知 UI，故截断显示
-            const maxLen = 100
-            const displayMsg = event.payload.error_msg.length > maxLen
-                ? event.payload.error_msg.slice(0, maxLen) + '...'
-                : event.payload.error_msg
-            // 弹出错误通知
-            notify()?.error({
-                title: '下载失败',
-                description: `歌曲“${task.songTitle}”错误：${displayMsg}`,
-                duration: 3000
+        unlisteners.push(
+            listen<DownloadErrorPayload>('download-error', (event) => {
+                const task = tasks.value.find((t) => t.id === event.payload.task_id)
+                if (!task) return
+                task.status = 'error'
+                task.errorMsg = event.payload.error_msg
+                saveTasks()
+                // 错误信息可能包含底层网络细节（如长 URL、堆栈等），过长会撑坏通知 UI，故截断显示
+                const maxLen = 100
+                const displayMsg = event.payload.error_msg.length > maxLen
+                    ? event.payload.error_msg.slice(0, maxLen) + '...'
+                    : event.payload.error_msg
+                // 弹出错误通知
+                notify()?.error({
+                    title: '下载失败',
+                    description: `歌曲“${task.songTitle}”错误：${displayMsg}`,
+                    duration: 3000
+                })
             })
-        })
+        )
 
-        listen<DownloadLinkExpiredPayload>('download-link-expired', (event) => {
-            const task = tasks.value.find((t) => t.id === event.payload.task_id)
-            if (!task) return
-            task.status = 'error'
-            task.errorMsg = '链接过期'
-            task.downloaded = event.payload.current_offset
-            saveTasks()
-            // 弹出链接过期通知
-            notify()?.warning({
-                title: '链接过期',
-                description: `歌曲“${task.songTitle}”下载链接过期，请稍后重试`,
-                duration: 3000
+        unlisteners.push(
+            listen<DownloadLinkExpiredPayload>('download-link-expired', (event) => {
+                const task = tasks.value.find((t) => t.id === event.payload.task_id)
+                if (!task) return
+                task.status = 'error'
+                task.errorMsg = '链接过期'
+                task.downloaded = event.payload.current_offset
+                saveTasks()
+                // 弹出链接过期通知
+                notify()?.warning({
+                    title: '链接过期',
+                    description: `歌曲“${task.songTitle}”下载链接过期，请稍后重试`,
+                    duration: 3000
+                })
             })
-        })
+        )
+
+        // 返回清理函数：异步调用每个 UnlistenFn，触发注销，然后清空数组
+        return () => {
+            unlisteners.forEach((unlistenPromise) => {
+                unlistenPromise.then((unlisten) => unlisten()).catch((e) => {
+                    console.error('移除事件监听器失败:', e)
+                })
+            })
+            unlisteners.length = 0
+        }
     }
 
     return {
