@@ -6,7 +6,7 @@
         </aside>
 
         <!-- 内容区域 -->
-        <main class="main-content" :class="{ 'has-bottom-nav': isNarrow }">
+        <main ref="mainContentRef" class="main-content" :class="{ 'has-bottom-nav': isNarrow }">
             <router-view v-slot="{ Component }">
                 <keep-alive>
                     <component :is="Component" />
@@ -25,13 +25,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { NMenu, useNotification, type MenuOption } from 'naive-ui'
 import { useCloseGuard } from '../composables/useCloseGuard'
 
 const router = useRouter()
 const route = useRoute()
+
+// 保存各路由页面的滚动位置，实现独立滚动记录
+const mainContentRef = ref<HTMLElement | null>(null)
+const scrollPositions: Record<string, number> = {}
+
+let removeRouteGuard: (() => void) | null = null
+
+// 恢复指定路由的滚动位置
+async function restoreScrollPosition(path: string) {
+    await nextTick()
+    if (mainContentRef.value) {
+        mainContentRef.value.scrollTop = scrollPositions[path] ?? 0
+    }
+}
+
+// 监听路由变化，恢复新路由的滚动位置
+watch(() => route.path, (newPath) => {
+    restoreScrollPosition(newPath)
+})
 
 // 在 n-dialog-provider 内部调用，确保 useDialog 正常工作
 useCloseGuard()
@@ -52,11 +71,26 @@ onMounted(() => {
     mediaQuery = window.matchMedia('(max-width: 767px)')
     updateNarrow(mediaQuery)
     mediaQuery.addEventListener('change', updateNarrow)
+
+    // 注册全局前置守卫，在离开当前路由前保存滚动位置
+    removeRouteGuard = router.beforeEach((_to, from, next) => {
+        if (mainContentRef.value) {
+            scrollPositions[from.path] = mainContentRef.value.scrollTop
+        }
+        next()
+    })
+    // 初始恢复当前路由的滚动位置（如果有保存过）
+    restoreScrollPosition(route.path)
 })
 
 onUnmounted(() => {
     if (mediaQuery) {
         mediaQuery.removeEventListener('change', updateNarrow)
+    }
+    // 移除路由守卫，避免内存泄漏
+    if (removeRouteGuard) {
+        removeRouteGuard()
+        removeRouteGuard = null
     }
 })
 
