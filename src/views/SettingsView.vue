@@ -172,7 +172,7 @@ onUnmounted(() => {
 })
 
 function goAbout() {
-    router.push('/about')
+    router.push('/settings/about')
 }
 
 // 检查更新相关

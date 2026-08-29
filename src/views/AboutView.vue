@@ -1,5 +1,9 @@
 <template>
     <div class="about-view">
+        <!-- 在关于页面左上角添加返回按钮，提供明确的返回导航入口 -->
+        <div class="back-row">
+            <n-button text @click="goBack">← 返回</n-button>
+        </div>
         <div class="about-card">
             <h1 class="app-title">HotDownloader</h1>
             <!-- 直接使用注入的变量，不再硬编码 -->
@@ -52,9 +56,22 @@
 
 <script setup lang="ts">
 import { NUl, NLi, NA } from 'naive-ui'
+import { useRouter } from 'vue-router'
 import { rustComponents, frontendComponents } from '../data/licenses'
 
 const version = import.meta.env.VITE_APP_VERSION
+
+const router = useRouter()
+
+// 处理返回按钮点击逻辑，确保用户能正确回到上一页
+function goBack() {
+    // 若存在历史记录则直接后退，否则回退到设置页
+    if (window.history.length > 1) {
+        router.back()
+    } else {
+        router.push('/settings')
+    }
+}
 </script>
 
 <style scoped>
@@ -65,6 +82,14 @@ const version = import.meta.env.VITE_APP_VERSION
     display: flex;
     flex-direction: column;
     gap: 24px;
+}
+
+/* 使用 flex 让按钮左对齐，并设置底部外边距与内容分隔 */
+.back-row {
+    display: flex;
+    justify-content: flex-start;
+    /* 轻微调整与下方卡片的间距，保持整体 gap 视觉统一 */
+    margin-bottom: -8px;
 }
 
 .about-card {

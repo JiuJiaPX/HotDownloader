@@ -30,7 +30,7 @@ const routes: RouteRecordRaw[] = [
         meta: { keepAlive: true },
     },
     {
-        path: '/about',
+        path: '/settings/about',
         name: 'about',
         component: () => import('../views/AboutView.vue'),
         meta: { keepAlive: false },
