@@ -17,7 +17,11 @@ pub(crate) async fn fetch_download_link_with_retry(
         match download::get_download_link(app_handle, song_mid, filename).await {
             Ok(link) => return Ok(link),
             Err(e) => {
-                last_err = e;
+                last_err = e.clone();
+                if !is_retryable_link_error(&e) {
+                    log::warn!("任务 {} 获取下载链接失败: {}", task_id, e);
+                    return Err(e);
+                }
                 log::warn!(
                     "任务 {} 获取下载链接失败 (尝试 {}/3): {}",
                     task_id,
@@ -37,4 +41,13 @@ pub(crate) async fn fetch_download_link_with_retry(
 /// 判断错误是否属于可重试的网络类错误
 pub(crate) fn is_retryable_network_error(err: &reqwest::Error) -> bool {
     err.is_timeout() || err.is_connect() || (err.is_request() && !err.is_body())
+}
+
+/// 判断获取下载链接时的错误是否属于可重试的网络类错误
+/// 可重试错误包括：网络错误、读取响应失败、解析响应失败（均为临时性问题）
+/// 平台拒绝类错误（如 104003）不可重试，直接返回
+fn is_retryable_link_error(err: &str) -> bool {
+    err.starts_with("网络错误")
+        || err.starts_with("读取响应失败")
+        || err.starts_with("解析响应失败")
 }
