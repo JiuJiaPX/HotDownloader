@@ -148,20 +148,21 @@ function handleMenuClick(key: string) {
     overflow-y: auto;
     padding: 16px;
     background-color: var(--bg-content);
+    /* 将回弹限制在当前滚动容器内部，保留视觉回弹但阻断滚动链向上传播，恢复主内容区滚动到顶端/底端时的回弹效果，同时避免回弹传播导致底部导航移动 */
+    overscroll-behavior: contain;
 }
 
+/* 为正常流底部导航保留合适的底部间距，避免内容与导航粘连 */
 .main-content.has-bottom-nav {
-    padding-bottom: 60px;
+    padding-bottom: 16px;
 }
 
-/* 底部导航：使用自定义背景变量 */
+/* 底部导航：改用正常流布局（非 fixed），解决 Android 滚动回弹时导航被拉伸的问题 */
+/* 需配合 flex 列容器使用，主内容无需预留底部内边距，高度由 flex 分配 */
 .bottom-nav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
+    width: 100%;
     height: 56px;
+    flex-shrink: 0;
     border-top: 1px solid var(--border-color);
     background-color: var(--bg-bottom);
 }

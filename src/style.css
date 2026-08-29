@@ -63,10 +63,6 @@ html.android .main-content {
 }
 
 /* 移动端底部导航区域避开 Android 手势条/底部安全区 */
-html.android .main-content.has-bottom-nav {
-  padding-bottom: calc(60px + var(--safe-area-bottom)) !important;
-}
-
 html.android .bottom-nav {
   height: calc(56px + var(--safe-area-bottom)) !important;
   padding-bottom: var(--safe-area-bottom) !important;
