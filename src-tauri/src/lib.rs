@@ -6,10 +6,12 @@ mod utils;
 
 use download::engine::DownloadEngine;
 use storage::store_wrapper;
+use tauri::Manager;
+
+#[cfg(desktop)]
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
