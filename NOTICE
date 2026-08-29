@@ -46,7 +46,7 @@ Frontend:
   @tauri-apps/plugin-dialog (MIT OR Apache-2.0)
   @tauri-apps/plugin-os     (MIT OR Apache-2.0)
   @tauri-apps/plugin-store  (MIT OR Apache-2.0)
-  dompurify                 ((MPL-2.0 OR Apache-2.0))
+  dompurify                 (MPL-2.0 OR Apache-2.0)
   marked                    (MIT)
   naive-ui                  (MIT)
   pinia                     (MIT)
