@@ -1,17 +1,11 @@
 use crate::utils::qrc;
-use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::command;
 
-const LYRIC_ENDPOINT: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
+use super::client::LYRIC_CLIENT;
 
-static LYRIC_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .expect("Failed to build lyric HTTP client")
-});
+const LYRIC_ENDPOINT: &str = "https://u.y.qq.com/cgi-bin/musicu.fcg";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LyricResponse {

@@ -1,8 +1,9 @@
 use serde_json::{json, Value};
 use tauri::command;
 
-use super::client::{get_guid, CLIENT};
+use super::client::CLIENT;
 use super::parser::parse_song;
+use crate::utils::guid::get_guid;
 
 /// 搜索歌曲，返回 JSON 数组字符串（扩展 SongInfo，增加 mediaMid 和 qualities）
 /// https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/musicSearch.js#L13

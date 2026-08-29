@@ -2,7 +2,8 @@ use serde_json::{json, Value};
 use std::path::Path;
 use tauri::command;
 
-use super::client::{get_guid, CLIENT};
+use super::client::CLIENT;
+use crate::utils::guid::get_guid;
 
 /// 统一获取下载链接与解密密钥（新接口：vkey.GetVkeyServer.CgiGetVkey）
 /// 替换旧的加密/非加密分离接口，统一使用一个接口获取所有品质的下载链接

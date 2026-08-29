@@ -2,7 +2,8 @@ use serde_json::{json, Value};
 use tauri::command;
 use url::Url;
 
-use super::client::{get_guid, CLIENT};
+use super::client::CLIENT;
+use crate::utils::guid::get_guid;
 
 /// 获取热搜关键词列表，返回 JSON 数组字符串
 /// https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/hotSearch.js#L15
