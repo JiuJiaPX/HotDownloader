@@ -10,7 +10,7 @@ use tauri_plugin_android_fs::{AndroidFsExt, FileAccessMode, FsUri};
 
 use super::progress;
 use crate::commands::api::client::CLIENT; // 全局 HTTP 客户端，用于下载封面
-use crate::commands::lyrics::LyricResponse;
+use crate::commands::api::lyrics::LyricResponse;
 
 /// 将歌词与封面写入音频文件 metadata
 /// 普通模式直接操作文件路径；SAF 模式通过临时文件回写实现跨平台支持

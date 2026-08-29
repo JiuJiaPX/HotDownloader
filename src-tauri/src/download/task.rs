@@ -21,7 +21,7 @@ use super::task_file::open_download_file;
 use super::task_lrc::write_lrc_file;
 use super::task_metadata::write_metadata;
 use super::task_path::{get_download_settings, resolve_download_path};
-use crate::commands::lyrics;
+use crate::commands::api::lyrics;
 use crate::utils::crypto;
 
 /// 下载专用 HTTP 客户端：不设总超时，避免大文件下载中断；设置读取超时 5 分钟

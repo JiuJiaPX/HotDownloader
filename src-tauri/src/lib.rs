@@ -129,12 +129,12 @@ pub fn run() {
             commands::api::suggest::fetch_suggestions,
             commands::api::playlist::fetch_playlist_songs,
             commands::api::update::check_update,
-            commands::lyrics::get_lyric_by_id,
-            commands::login::create_qr_login,
-            commands::login::check_qr_login,
-            commands::login::login_with_uin_authst,
-            commands::login::logout,
-            commands::login::get_login_status,
+            commands::api::lyrics::get_lyric_by_id,
+            commands::api::login::create_qr_login,
+            commands::api::login::check_qr_login,
+            commands::api::login::login_with_uin_authst,
+            commands::api::login::logout,
+            commands::api::login::get_login_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

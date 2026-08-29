@@ -117,7 +117,7 @@ pub(crate) async fn get_download_link(
 ) -> Result<(String, String), String> {
     // 读取登录态（未登录时返回 None）
     // 从 settings 获取 loginUin 与 authst
-    let (uin, authst) = crate::commands::login::get_login_credentials(app_handle).await;
+    let (uin, authst) = crate::commands::api::login::get_login_credentials(app_handle).await;
 
     // 统一调用新接口获取链接和密钥
     let (url, ekey) =
