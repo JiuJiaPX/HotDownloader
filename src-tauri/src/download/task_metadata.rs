@@ -124,11 +124,9 @@ pub(crate) async fn write_metadata(
     // 尽量保留 ID3v1 标签，仅当待写入歌词含有多字节字符（如中文）且文件存在 ID3v1 时，主动移除 ID3v1，避免 lofty 保存时因编码转换导致 panic。
     let needs_remove_id3v1 = lyric_text
         .as_ref()
-        .map_or(false, |text| text.chars().any(|c| c as u32 > 0xFF));
-    if needs_remove_id3v1 {
-        if tagged_file.remove(TagType::Id3v1).is_some() {
-            log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签");
-        }
+        .is_some_and(|text| text.chars().any(|c| c as u32 > 0xFF));
+    if needs_remove_id3v1 && tagged_file.remove(TagType::Id3v1).is_some() {
+        log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签");
     }
 
     // 确保存在主标签

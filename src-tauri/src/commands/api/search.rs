@@ -1,3 +1,8 @@
+//! 歌曲搜索模块。
+//!
+//! 通过 QQ 音乐移动端搜索接口进行歌曲搜索，返回解析后的歌曲列表和分页信息。
+//! 歌曲解析复用 [`super::parser::parse_song`] 函数。
+
 use serde_json::{json, Value};
 use tauri::command;
 
@@ -5,16 +10,32 @@ use super::client::CLIENT;
 use super::parser::parse_song;
 use crate::utils::guid::get_guid;
 
-/// 搜索歌曲，返回 JSON 数组字符串（扩展 SongInfo，增加 mediaMid 和 qualities）
-/// https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/musicSearch.js#L13
+/// 搜索歌曲，返回 JSON 数组字符串（扩展 SongInfo，增加 `mediaMid` 和 `qualities`）。
+///
+/// 该命令调用 QQ 音乐移动端搜索接口，根据关键字、页码和每页数量搜索歌曲。
+/// 请求中需要动态生成 `searchid` 和 `guid`，并携带设备信息等参数以模拟真实客户端。
+/// 搜索结果中的每首歌曲通过 [`parse_song`] 解析，并返回分页标志 `has_more`。
+///
+/// 参考实现：<https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/musicSearch.js#L13>
+///
+/// # 参数
+/// - `keyword`: 搜索关键字。
+/// - `page`: 页码（从 1 开始）。
+/// - `limit`: 每页歌曲数量。
+///
+/// # 返回
+/// - `Ok(String)`：JSON 字符串，包含 `songs`（歌曲数组）和 `has_more`（是否有下一页）两个字段。
+/// - `Err(String)`：错误信息，包括网络错误、接口错误、序列化错误等。
 #[command]
 pub async fn search_songs(keyword: String, page: u32, limit: u32) -> Result<String, String> {
+    // 生成搜索 ID（当前毫秒时间戳）
     let searchid = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis()
         .to_string();
 
+    // 构造请求体
     let request_body = json!({
         "comm": {
             "ct": "11",
@@ -102,6 +123,7 @@ pub async fn search_songs(keyword: String, page: u32, limit: u32) -> Result<Stri
     let nextpage = meta["nextpage"].as_i64().unwrap_or(-1);
     let has_more = nextpage != -1;
 
+    // 逐首解析歌曲，过滤无法解析的条目
     let mut songs = Vec::new();
     for item in item_song {
         if let Some(song_obj) = parse_song(item) {

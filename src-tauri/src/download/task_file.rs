@@ -7,13 +7,28 @@ use tauri_plugin_android_fs::{AndroidFsExt, FileAccessMode, FsUri};
 
 use super::progress;
 
-/// 文件写入缓冲区容量（64 KB）
+/// 文件写入缓冲区容量（64 KB）。
+///
+/// 用于 `BufWriter`，在写入磁盘前暂存数据，减少频繁的 I/O 操作。
 const FILE_BUFFER_CAPACITY: usize = 64 * 1024;
 
-/// 打开或创建下载目标文件，并返回 BufWriter。
-/// - `downloaded`: 当前已下载字节数，函数内部可能将其重置为 0（如果文件异常）。
-/// - `saf_file_uri`: 用于 SAF 模式，函数内部可能更新为实际文件的 URI。
-/// 返回 `Some(BufWriter)` 表示成功；返回 `None` 表示发生错误（已发送错误事件），调用方应跳出下载循环。
+/// 打开或创建下载目标文件，并返回带缓冲的写入器。
+///
+/// 根据是否使用 Android SAF（Storage Access Framework）来决定调用相应的内部函数。
+/// 该函数会处理文件不存在、文件大小异常等情况，并可能在必要时重置 `downloaded` 计数。
+///
+/// # 参数
+/// - `app_handle`: Tauri 应用句柄，用于发送错误事件和访问 Android FS 插件。
+/// - `task_id`: 下载任务的唯一标识，用于错误事件中定位具体任务。
+/// - `download_dir`: 下载目标路径。在普通模式下是完整的文件路径；在 SAF 模式下仅作为文件名使用。
+/// - `is_saf`: 是否启用 SAF 模式。
+/// - `saf_folder_uri`: SAF 模式下父目录的 URI（JSON 字符串形式），仅在 `is_saf` 为 `true` 时有效。
+/// - `downloaded`: 可变引用，表示当前已下载的字节数。在文件异常或新文件情况下可能被重置为 0。
+/// - `saf_file_uri`: 可变引用，用于记录最终实际使用的 SAF 文件 URI（仅在 SAF 模式下会被更新）。
+///
+/// # 返回
+/// - `Some(BufWriter<fs::File>)`：成功打开或创建文件，调用方可继续写入。
+/// - `None`：发生错误（已通过 [`progress::emit_error`] 发送错误事件），调用方应中止下载循环。
 pub(crate) async fn open_download_file(
     app_handle: &AppHandle,
     task_id: &str,
@@ -38,7 +53,24 @@ pub(crate) async fn open_download_file(
     }
 }
 
-/// SAF 模式文件打开/创建
+/// SAF 模式下打开或创建下载目标文件。
+///
+/// 使用 Android Storage Access Framework 进行文件操作。
+/// 首先解析父目录 URI，然后尝试查找已存在的文件；若存在则根据 `downloaded` 判断是续传还是重置；
+/// 若不存在则创建新文件。最终返回一个 `BufWriter` 用于写入。
+///
+/// # 参数
+/// - `app_handle`: Tauri 应用句柄，用于访问 Android FS 插件和发送错误事件。
+/// - `task_id`: 下载任务唯一标识，用于错误事件。
+/// - `download_dir`: 文件名（不含路径），SAF 模式下父目录由 `saf_folder_uri` 指定。
+/// - `saf_folder_uri`: 父目录的 URI（JSON 字符串形式），必须为 `Some` 且可解析。
+/// - `downloaded`: 可变引用，已下载字节数。根据文件状态可能被重置为 0。
+/// - `saf_file_uri`: 可变引用，将被更新为最终文件的实际 URI（无论文件是已存在还是新创建）。
+///
+/// # 返回
+/// - `Some(BufWriter<fs::File>)`：成功打开文件，准备好写入。
+/// - `None`：任何一步失败（如 URI 解析错误、文件打开/创建失败、seek 失败等），
+///   已通过 [`progress::emit_error`] 发送错误事件。
 async fn open_saf_file(
     app_handle: &AppHandle,
     task_id: &str,
@@ -49,7 +81,7 @@ async fn open_saf_file(
 ) -> Option<BufWriter<fs::File>> {
     let api = app_handle.android_fs();
 
-    // 解析父目录 FsUri（包含 document_top_tree_uri）
+    // 解析父目录 FsUri（包含 document_top_tree_uri 等信息）
     let parent_uri = match FsUri::from_json_str(saf_folder_uri?) {
         Ok(uri) => uri,
         Err(e) => {
@@ -59,7 +91,7 @@ async fn open_saf_file(
         }
     };
 
-    // download_dir 此时是文件名
+    // 在 SAF 模式下，`download_dir` 仅表示文件名
     let file_path = Path::new(download_dir);
 
     // 尝试解析已存在的文件
@@ -71,10 +103,10 @@ async fn open_saf_file(
             *saf_file_uri = Some(file_uri.uri.clone());
 
             if *downloaded > 0 {
-                // 续传模式：打开文件并校验大小后 seek 到偏移量
+                // 续传模式：以读写模式打开文件，并校验大小后 seek 到偏移量
                 match api.open_file(&file_uri, FileAccessMode::ReadWrite) {
                     Ok(mut f) => {
-                        // 校验文件大小：如果文件长度小于期望的偏移，说明文件异常，重置下载
+                        // 校验文件大小：如果文件长度小于期望的偏移，说明文件异常，需要重置下载
                         let should_reset = match f.metadata() {
                             Ok(meta) => meta.len() < *downloaded,
                             Err(_) => true, // 无法获取元数据，保守重置
@@ -116,7 +148,7 @@ async fn open_saf_file(
                     }
                 }
             } else {
-                // 从头开始：截断文件
+                // 从头开始：以可写模式打开并截断文件
                 match api.open_file_writable(&file_uri) {
                     Ok(f) => Some(f),
                     Err(e) => {
@@ -156,7 +188,20 @@ async fn open_saf_file(
     .map(|f| BufWriter::with_capacity(FILE_BUFFER_CAPACITY, f))
 }
 
-/// 普通模式文件打开/创建
+/// 普通文件系统模式下打开或创建下载目标文件。
+///
+/// 根据 `downloaded` 的值决定是全新下载（截断模式）还是续传（追加模式）。
+/// 在续传时会检查文件大小是否匹配，若不匹配则重置文件并从头下载。
+///
+/// # 参数
+/// - `app_handle`: Tauri 应用句柄，用于发送错误事件。
+/// - `task_id`: 下载任务唯一标识，用于错误事件。
+/// - `download_dir`: 完整的本地文件路径。
+/// - `downloaded`: 可变引用，已下载字节数。文件异常时可能被重置为 0。
+///
+/// # 返回
+/// - `Some(BufWriter<fs::File>)`：成功打开文件。
+/// - `None`：文件创建/打开失败，或续传时文件异常且重置失败。
 fn open_normal_file(
     app_handle: &AppHandle,
     task_id: &str,
@@ -164,6 +209,7 @@ fn open_normal_file(
     downloaded: &mut u64,
 ) -> Option<BufWriter<fs::File>> {
     if *downloaded == 0 {
+        // 全新下载：以写入、创建、截断模式打开
         match OpenOptions::new()
             .write(true)
             .create(true)
@@ -178,7 +224,7 @@ fn open_normal_file(
             }
         }
     } else {
-        // 续传任务，先以追加模式打开
+        // 续传任务：先以追加模式打开
         match OpenOptions::new()
             .create(true)
             .append(true)
@@ -207,6 +253,7 @@ fn open_normal_file(
                             }
                         }
                     } else {
+                        // 文件大小正常，直接使用追加模式打开的文件
                         Some(BufWriter::with_capacity(FILE_BUFFER_CAPACITY, f))
                     }
                 } else {

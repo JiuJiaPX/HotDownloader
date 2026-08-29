@@ -1,3 +1,8 @@
+//! 热搜关键词与搜索建议模块。
+//!
+//! 提供热搜关键词获取和搜索自动补全建议两个 Tauri 命令。
+//! 热搜数据来自腾讯音乐热搜接口，建议数据来自 QQ 音乐智能搜索接口。
+
 use serde_json::{json, Value};
 use tauri::command;
 use url::Url;
@@ -5,10 +10,19 @@ use url::Url;
 use super::client::CLIENT;
 use crate::utils::guid::get_guid;
 
-/// 获取热搜关键词列表，返回 JSON 数组字符串
-/// https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/hotSearch.js#L15
+/// 获取热搜关键词列表，返回 JSON 数组字符串。
+///
+/// 调用腾讯音乐热搜接口，获取当前热门搜索关键词，最多返回前 30 个非空关键词。
+/// 请求需要 `guid` 和设备信息等公共参数。
+///
+/// 参考实现：<https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/hotSearch.js#L15>
+///
+/// # 返回
+/// - `Ok(String)`：JSON 数组字符串，每个元素为热搜关键词字符串。
+/// - `Err(String)`：错误信息，包括网络错误、接口错误、数据缺失等。
 #[command]
 pub async fn fetch_hot_keywords() -> Result<String, String> {
+    // 构造请求体，模拟 PC 端请求
     let request_body = json!({
         "comm": {
             "ct": "19",
@@ -34,6 +48,7 @@ pub async fn fetch_hot_keywords() -> Result<String, String> {
         }
     });
 
+    // 发送 POST 请求
     let resp = CLIENT
         .post("https://u.y.qq.com/cgi-bin/musicu.fcg")
         .header("Content-Type", "application/json")
@@ -59,10 +74,12 @@ pub async fn fetch_hot_keywords() -> Result<String, String> {
         return Err(format!("热搜接口错误: code={}", code));
     }
 
+    // 提取热搜关键词数组
     let vec_hotkey = hotkey["data"]["vec_hotkey"]
         .as_array()
         .ok_or("未找到热搜列表")?;
 
+    // 收集前 30 个非空关键词
     let mut keywords = Vec::new();
     for item in vec_hotkey.iter().take(30) {
         if let Some(q) = item["query"].as_str() {
@@ -75,8 +92,21 @@ pub async fn fetch_hot_keywords() -> Result<String, String> {
     serde_json::to_string(&keywords).map_err(|e| format!("序列化结果失败: {}", e))
 }
 
-/// 获取搜索建议
-/// https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/tipSearch.js#L10
+/// 获取搜索建议。
+///
+/// 根据用户输入的关键字，调用 QQ 音乐智能搜索接口，返回按类型（歌曲、歌手、专辑、MV）分组的搜索建议列表。
+/// 建议数据中的每个条目包含 `id`、`mid`、`name`、`singer`、`cover` 等字段，
+/// 其中 MV 类型额外包含 `vid` 字段。
+///
+/// 参考实现：<https://github.com/lyswhut/lx-music-desktop/blob/9c364b482e5621a1d38b50e8610d2fb974457e6e/src/renderer/utils/musicSdk/tx/tipSearch.js#L10>
+///
+/// # 参数
+/// - `keyword`: 用户输入的关键字。
+///
+/// # 返回
+/// - `Ok(String)`：JSON 对象字符串，包含 `song`、`singer`、`album`、`mv` 四个键，
+///   每个键对应一个建议条目数组。
+/// - `Err(String)`：错误信息，包括网络错误、接口错误、数据缺失等。
 #[command]
 pub async fn fetch_suggestions(keyword: String) -> Result<String, String> {
     // 构建 URL，并进行 URL 编码
@@ -98,6 +128,7 @@ pub async fn fetch_suggestions(keyword: String) -> Result<String, String> {
     )
     .map_err(|e| format!("URL 构建失败: {}", e))?;
 
+    // 发送 GET 请求
     let resp = CLIENT
         .get(url)
         .header("Referer", "https://y.qq.com/portal/player.html")
@@ -133,9 +164,11 @@ pub async fn fetch_suggestions(keyword: String) -> Result<String, String> {
 
     let mut result = serde_json::Map::new();
 
+    // 遍历每种类型，提取对应的建议条目
     for (type_key, _type_name) in types {
         let mut items = Vec::new();
 
+        // 获取该类型下的 itemlist 数组
         if let Some(obj) = root_data.get(type_key).and_then(|v| v.as_object()) {
             if let Some(itemlist) = obj.get("itemlist").and_then(|v| v.as_array()) {
                 for item in itemlist {

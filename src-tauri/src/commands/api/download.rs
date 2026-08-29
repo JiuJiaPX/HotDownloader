@@ -1,3 +1,10 @@
+//! 下载链接与解密密钥获取模块。
+//!
+//! 该模块提供统一的下载链接获取接口，替代旧的加密/非加密分离接口。
+//! 核心函数 [`get_download_link`] 会根据文件扩展名判断是否需要解密密钥，
+//! 并返回完整的下载 URL 和对应的密钥（非加密文件密钥为空）。
+//! 同时提供 Tauri 命令 [`fetch_download_link`] 供前端调用。
+
 use serde_json::{json, Value};
 use std::path::Path;
 use tauri::command;
@@ -5,13 +12,27 @@ use tauri::command;
 use super::client::CLIENT;
 use crate::utils::guid::get_guid;
 
-/// 统一获取下载链接与解密密钥（新接口：vkey.GetVkeyServer.CgiGetVkey）
-/// 替换旧的加密/非加密分离接口，统一使用一个接口获取所有品质的下载链接
-/// 登录态通过 comm 和 param 中的 uin 字段传递，未登录时为空字符串
-/// 响应中的 sip 数组为优先 CDN 列表，若不为空则使用第一个作为下载 URL 前缀，否则使用默认 CDN
-/// purl 为不带 CDN 的相对路径，ekey 为解密密钥（可能为空）
-/// 最终返回值中，ekey 是否生效由调用方根据文件后缀决定，本函数原样返回响应中的 ekey
-/// https://github.com/lyswhut/lx-music-source/blob/55eb9881dad6ca895505352f3a0a7d1dfa3444e0/src/apis/tx.js#L42
+/// 统一获取下载链接与解密密钥（新接口：`vkey.GetVkeyServer.CgiGetVkey`）。
+///
+/// 替换旧的加密/非加密分离接口，统一使用一个接口获取所有品质的下载链接。
+/// 登录态通过 `comm` 和 `param` 中的 `uin` 字段传递，未登录时为空字符串。
+/// 响应中的 `sip` 数组为优先 CDN 列表，若不为空则使用第一个作为下载 URL 前缀，
+/// 否则使用默认 CDN `https://wx.music.tc.qq.com/`。
+/// `purl` 为不带 CDN 的相对路径，`ekey` 为解密密钥（可能为空）。
+/// 最终返回值中，`ekey` 是否生效由调用方根据文件后缀决定，本函数原样返回响应中的 `ekey`。
+///
+/// 参考实现：<https://github.com/lyswhut/lx-music-source/blob/55eb9881dad6ca895505352f3a0a7d1dfa3444e0/src/apis/tx.js#L42>
+///
+/// # 参数
+/// - `song_mid`: 歌曲的唯一标识（mid）。
+/// - `filename`: 品质文件名（例如 `M800001abc.mp3`），决定下载的具体文件。
+/// - `uin`: 可选用户 QQ 号，用于登录态传递。
+/// - `authst`: 可选登录授权令牌，用于登录态传递。
+///
+/// # 返回
+/// - `Ok((String, String))`：元组 `(完整下载链接, 解密密钥)`。
+///   解密密钥 `ekey` 可能为空，其是否生效由调用方根据文件后缀决定。
+/// - `Err(String)`：错误信息，包括网络错误、接口错误、文件不可下载等。
 async fn fetch_vkey_link(
     song_mid: &str,
     filename: &str,
@@ -105,12 +126,21 @@ async fn fetch_vkey_link(
     Ok((full_url, ekey))
 }
 
-/// 获取下载链接与解密密钥
-/// 参数：song_mid 为歌曲 mid，filename 为品质文件名（如 M800001abc.mp3）
-/// 返回 (完整下载链接, 解密密钥)，非加密文件密钥为空
-/// 核心函数：获取下载链接和密钥，供下载模块调用
-/// 获取下载链接与解密密钥（对外统一入口）
-/// 传入 AppHandle 以读取登录态，并将登录态注入请求
+/// 获取下载链接与解密密钥（对外统一入口）。
+///
+/// 该函数从应用设置中读取登录态（uin 和 authst），然后调用 [`fetch_vkey_link`] 获取原始链接和密钥。
+/// 根据文件扩展名判断是否为加密文件（`.mgg` 或 `.mflac`），
+/// 若是则返回解密密钥，否则强制密钥为空字符串。
+///
+/// # 参数
+/// - `app_handle`: Tauri 应用句柄，用于读取登录态。
+/// - `song_mid`: 歌曲的唯一标识（mid）。
+/// - `filename`: 品质文件名（例如 `M800001abc.mp3`）。
+///
+/// # 返回
+/// - `Ok((String, String))`：元组 `(完整下载链接, 解密密钥)`。
+///   对于非加密文件，密钥始终为空字符串。
+/// - `Err(String)`：错误信息，来自 [`fetch_vkey_link`] 或读取登录态的过程。
 pub(crate) async fn get_download_link(
     app_handle: &tauri::AppHandle,
     song_mid: &str,
@@ -139,6 +169,19 @@ pub(crate) async fn get_download_link(
     }
 }
 
+/// Tauri 命令：获取下载链接和密钥。
+///
+/// 前端调用此命令，传入歌曲 mid 和品质文件名，返回 JSON 字符串，
+/// 格式为 `{"url": "<完整下载链接>", "key": "<解密密钥>"}`。
+///
+/// # 参数
+/// - `app`: Tauri 应用句柄。
+/// - `song_mid`: 歌曲唯一标识。
+/// - `filename`: 品质文件名。
+///
+/// # 返回
+/// - `Ok(String)`：JSON 字符串，包含 `url` 和 `key` 字段。
+/// - `Err(String)`：错误信息。
 #[command]
 pub async fn fetch_download_link(
     app: tauri::AppHandle,

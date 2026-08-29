@@ -1,11 +1,29 @@
+//! 应用更新检查模块。
+//!
+//! 通过 GitHub REST API 获取仓库最新 release 信息，供前端检测更新使用。
+
 use serde_json::{json, Value};
 use tauri::command;
 
 use super::client::CLIENT;
 
-/// 检查 GitHub 最新发布版本
-/// 通过 GitHub REST API 获取仓库最新 release 信息，返回 JSON 字符串
-/// 字段包含：tag_name、name、body（更新内容）、html_url、published_at、prerelease、current_version、assets
+/// 检查 GitHub 最新发布版本。
+///
+/// 该命令调用 GitHub REST API 获取仓库最新 release 信息。
+/// 返回的 JSON 字符串包含版本标签、名称、更新说明、发布页面链接、发布时间、
+/// 是否为预发布版本、当前应用版本以及资源列表（安装包直链等）。
+///
+/// # 返回
+/// - `Ok(String)`：JSON 字符串，字段说明如下：
+///   - `tag_name`: 最新发布的标签名（例如 `v1.2.3`）。
+///   - `name`: 发布名称。
+///   - `body`: 更新内容说明（Markdown 格式）。
+///   - `html_url`: 发布页面 URL。
+///   - `published_at`: 发布时间（ISO 8601 字符串）。
+///   - `prerelease`: 是否为预发布版本。
+///   - `current_version`: 当前应用版本（来自 `Cargo.toml`，编译时注入）。
+///   - `assets`: 发布资源列表，每个元素包含 `name`、`browser_download_url`、`size`。
+/// - `Err(String)`：错误信息，包括网络错误、响应读取失败、JSON 解析失败等。
 #[command]
 pub async fn check_update() -> Result<String, String> {
     let url = "https://api.github.com/repos/lerdb/HotDownloader/releases/latest";
@@ -46,6 +64,7 @@ pub async fn check_update() -> Result<String, String> {
                         .unwrap_or("")
                         .to_string();
                     let size = asset["size"].as_u64().unwrap_or(0);
+                    // 过滤掉名称或下载链接为空的条目
                     if name.is_empty() || browser_download_url.is_empty() {
                         return None;
                     }
@@ -59,6 +78,7 @@ pub async fn check_update() -> Result<String, String> {
         })
         .unwrap_or_default();
 
+    // 组装最终返回结果
     let result = json!({
         "tag_name": tag_name,
         "name": name,

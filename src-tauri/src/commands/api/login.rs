@@ -105,8 +105,15 @@ enum LoginStatus {
     Error(String),
 }
 
+/// 共享的单个登录会话状态（可被多个任务并发访问）。
+type SharedLoginSessionState = Arc<Mutex<LoginSessionState>>;
+/// 二维码 ID 到共享会话状态的映射。
+type LoginSessionMap = HashMap<String, SharedLoginSessionState>;
+/// 全局登录会话表的共享映射。
+type SharedLoginSessionMap = Arc<Mutex<LoginSessionMap>>;
+
 /// 全局登录会话表，以 qrcode_id 为键。
-static LOGIN_SESSIONS: Lazy<Arc<Mutex<HashMap<String, Arc<Mutex<LoginSessionState>>>>>> =
+static LOGIN_SESSIONS: Lazy<SharedLoginSessionMap> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// `music.login.LoginServer.Login` 接口返回的数据结构。
