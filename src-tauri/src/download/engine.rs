@@ -277,7 +277,7 @@ impl DownloadEngine {
                     let ctrl_clone = ctrl.clone();
 
                     tokio::spawn(async move {
-                        download_task(ctx, ctrl_clone.clone(), app_handle).await;
+                        let completed_ok = download_task(ctx, ctrl_clone.clone(), app_handle).await;
 
                         // 提取最终路径并存入 final_paths（在通知 done 之前）
                         let final_path = ctrl_clone.final_path.lock().await.clone();
@@ -295,6 +295,11 @@ impl DownloadEngine {
 
                         // 下载结束（完成/错误），仅移除控制器，保留任务上下文供删除文件使用
                         engine.active_controllers.lock().await.remove(&task_id);
+
+                        // 任务成功完成后自动清理 task_contexts，减少内存占用
+                        if completed_ok {
+                            engine.task_contexts.lock().await.remove(&task_id);
+                        }
 
                         // 活动计数减一，唤醒调度器
                         active_downloads.fetch_sub(1, Ordering::SeqCst);

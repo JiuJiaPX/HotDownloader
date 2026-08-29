@@ -79,7 +79,12 @@ async fn wait_for_resume_async(controller: &TaskController) -> bool {
 }
 
 /// 实际执行下载的函数
-pub async fn download_task(ctx: TaskContext, controller: TaskController, app_handle: AppHandle) {
+// 返回任务是否成功完成，供调度器决定是否清理任务上下文
+pub async fn download_task(
+    ctx: TaskContext,
+    controller: TaskController,
+    app_handle: AppHandle,
+) -> bool {
     // 获取全部设置，避免在 resolve_download_path 中重复调用
     let (
         dir_setting,
@@ -111,7 +116,7 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             if let Err(e) = fs::create_dir_all(parent_dir) {
                 log::error!("创建下载目录失败: {}", e);
                 progress::emit_error(&app_handle, &ctx.task_id, "下载目录无法访问");
-                return;
+                return false;
             }
         }
     }
@@ -547,4 +552,6 @@ pub async fn download_task(ctx: TaskContext, controller: TaskController, app_han
             }
         }
     }
+
+    completed_ok
 }
