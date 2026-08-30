@@ -27,6 +27,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_android_fs::init())
         .plugin(tauri_plugin_os::init()) // 注册 OS 插件，提供平台检测能力
+        .plugin(tauri_plugin_notification::init()) // 注册通知插件，支持下载完成系统通知
         .setup(|app| {
             let engine = DownloadEngine::new(app.handle().clone());
             let max_concurrent = match store_wrapper::load_string(app.handle(), "settings") {
@@ -135,6 +136,8 @@ pub fn run() {
             commands::api::login::login_with_uin_authst,
             commands::api::login::logout,
             commands::api::login::get_login_status,
+            commands::notify::request_notification_permission,
+            commands::notify::check_notification_permission,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

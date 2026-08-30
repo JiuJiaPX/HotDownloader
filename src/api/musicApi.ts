@@ -78,6 +78,16 @@ export async function checkDownloadPath(params: {
     return JSON.parse(json)
 }
 
+// 请求系统通知权限（主要用于 Android）
+export async function requestNotificationPermission(): Promise<boolean> {
+    return invoke<boolean>('request_notification_permission')
+}
+
+// 检查系统通知权限是否已授予（主要用于 Android）
+export async function checkNotificationPermission(): Promise<boolean> {
+    return invoke<boolean>('check_notification_permission')
+}
+
 // ==================== 登录相关 API ====================
 
 // 登录二维码返回

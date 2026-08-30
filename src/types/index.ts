@@ -43,6 +43,8 @@ export interface Settings {
     openid?: string
     // 重复文件处理策略：ask=弹窗询问，overwrite=覆盖，rename=自动重命名，cancel=取消下载
     duplicateStrategy?: 'ask' | 'overwrite' | 'rename' | 'cancel'
+    // 下载完成后是否发送系统通知
+    notifyOnComplete: boolean
 }
 
 /** 歌曲可用的单个品质项 */
@@ -173,6 +175,7 @@ export const DEFAULT_SETTINGS: Settings = {
     accessToken: '',
     openid: '',
     duplicateStrategy: 'ask',
+    notifyOnComplete: false,
 }
 
 // GitHub 最新 release 信息

@@ -276,6 +276,10 @@ impl DownloadEngine {
                     let engine = self.clone();
                     let ctrl_clone = ctrl.clone();
 
+                    let notify_song_title = ctx.song_info.title.clone();
+                    let notify_artist = ctx.song_info.artist.clone();
+                    let notify_app_handle = app_handle.clone();
+
                     tokio::spawn(async move {
                         let completed_ok = download_task(ctx, ctrl_clone.clone(), app_handle).await;
 
@@ -296,8 +300,32 @@ impl DownloadEngine {
                         // 下载结束（完成/错误），仅移除控制器，保留任务上下文供删除文件使用
                         engine.active_controllers.lock().await.remove(&task_id);
 
-                        // 任务成功完成后自动清理 task_contexts，减少内存占用
                         if completed_ok {
+                            // 下载完成后发送系统通知
+                            let notify_enabled = crate::storage::store_wrapper::load_string(
+                                &notify_app_handle,
+                                "settings",
+                            )
+                            .ok()
+                            .and_then(|json_str| {
+                                serde_json::from_str::<serde_json::Value>(&json_str).ok()
+                            })
+                            .and_then(|settings| {
+                                settings.get("notifyOnComplete").and_then(|v| v.as_bool())
+                            })
+                            .unwrap_or(false); // 默认不发送通知
+
+                            if notify_enabled {
+                                crate::commands::notify::send_download_complete_notification(
+                                    &notify_app_handle,
+                                    &notify_song_title,
+                                    &notify_artist,
+                                );
+                            } else {
+                                log::info!("用户已关闭下载完成通知，跳过发送");
+                            }
+
+                            // 任务成功完成后自动清理 task_contexts，减少内存占用
                             engine.task_contexts.lock().await.remove(&task_id);
                         }
 

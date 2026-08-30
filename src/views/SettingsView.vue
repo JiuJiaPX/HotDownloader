@@ -29,6 +29,7 @@
                     <ConcurrencySetting />
                     <JumpToTaskSetting />
                     <DuplicateStrategySetting />
+                    <NotifySetting />
                 </n-form>
             </div>
         </template>
@@ -51,6 +52,7 @@
                 <ConcurrencySetting />
                 <JumpToTaskSetting />
                 <DuplicateStrategySetting />
+                <NotifySetting />
                 <ClearHistoryButton />
             </n-form>
         </template>
@@ -80,6 +82,7 @@ import WriteMetadataSetting from '../components/settings/WriteMetadataSetting.vu
 import DownloadLrcSetting from '../components/settings/DownloadLrcSetting.vue'
 import LoginSetting from '../components/settings/LoginSetting.vue'
 import DuplicateStrategySetting from '../components/settings/DuplicateStrategySetting.vue'
+import NotifySetting from '../components/settings/NotifySetting.vue'
 import UpdateChecker from '../components/settings/UpdateChecker.vue'
 
 const router = useRouter()
