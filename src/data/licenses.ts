@@ -103,6 +103,10 @@ export const rustComponents: ComponentInfo[] = [
     "license": "Apache-2.0 OR MIT"
   },
   {
+    "name": "tauri-plugin-notification",
+    "license": "Apache-2.0 OR MIT"
+  },
+  {
     "name": "tauri-plugin-opener",
     "license": "Apache-2.0 OR MIT"
   },

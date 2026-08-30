@@ -33,6 +33,7 @@ Rust:
   tauri-plugin-android-fs   (Apache-2.0 OR MIT)
   tauri-plugin-dialog       (Apache-2.0 OR MIT)
   tauri-plugin-log          (Apache-2.0 OR MIT)
+  tauri-plugin-notification (Apache-2.0 OR MIT)
   tauri-plugin-opener       (Apache-2.0 OR MIT)
   tauri-plugin-os           (Apache-2.0 OR MIT)
   tauri-plugin-store        (Apache-2.0 OR MIT)
