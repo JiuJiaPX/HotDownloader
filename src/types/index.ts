@@ -84,6 +84,12 @@ export interface SongInfo {
     track?: number
     disc?: number
     trackTotal?: number
+    /** 专辑歌手（用于专辑文件夹命名） */
+    albumArtist?: string
+    /** 专辑发布时间（用于专辑文件夹命名） */
+    albumPublishTime?: string
+    /** 专辑歌曲数（用于专辑文件夹命名） */
+    albumSongCount?: number
 }
 
 // 搜索结果完整返回

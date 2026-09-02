@@ -374,7 +374,19 @@ function closeAlbumDetail() {
 }
 
 function onSingleDownload(song: SongInfo) {
-    downloadSingle(song)
+    downloadSingle(enrichSongsWithAlbumMeta([song])[0])
+}
+
+function enrichSongsWithAlbumMeta(songs: SongInfo[]): SongInfo[] {
+    const info = albumDetailInfo.value
+    if (!info) return songs
+    return songs.map((s) => ({
+        ...s,
+        album: info.name?.trim() || s.album,
+        albumArtist: info.artist,
+        albumPublishTime: info.publishTime,
+        albumSongCount: info.songCount || songs.length,
+    }))
 }
 
 function onBatchDownload() {
@@ -386,18 +398,13 @@ function onBatchDownload() {
 
 function onAlbumBatchDownload(songs: SongInfo[]) {
     if (songs.length > 0) {
-        batchDownload(songs)
+        batchDownload(enrichSongsWithAlbumMeta(songs))
     }
 }
 
 function onDownloadAlbum(songs: SongInfo[]) {
     if (songs.length === 0) return
-    const albumName = albumDetailInfo.value?.name?.trim() || ''
-    const withAlbum = songs.map((s) => ({
-        ...s,
-        album: albumName || s.album,
-    }))
-    batchDownload(withAlbum, { useMusicLibrary: true })
+    batchDownload(enrichSongsWithAlbumMeta(songs), { useMusicLibrary: true })
 }
 </script>
 

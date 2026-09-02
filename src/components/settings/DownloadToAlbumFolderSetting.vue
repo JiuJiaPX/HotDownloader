@@ -5,7 +5,7 @@
             <n-switch :value="settingsStore.settings.downloadToAlbumFolder"
                 @update:value="(val) => (settingsStore.settings.downloadToAlbumFolder = val)" />
         </div>
-        <div class="setting-hint">开启后，歌曲会保存到「下载目录 / 专辑名」下；专辑名为空时使用「未知专辑」</div>
+        <div class="setting-hint">开启后，歌曲会保存到「下载目录 / 专辑名 - 歌手 - 发布时间 - N首」下；信息缺失时自动省略对应段</div>
     </template>
     <template v-else>
         <n-form-item label="下载到专辑文件夹">
@@ -13,7 +13,7 @@
                 @update:value="(val) => (settingsStore.settings.downloadToAlbumFolder = val)" />
             <template #feedback>
                 <div class="setting-hint">
-                    开启后，歌曲会保存到「下载目录 / 专辑名」下；专辑名为空时使用「未知专辑」
+                    开启后，歌曲会保存到「下载目录 / 专辑名 - 歌手 - 发布时间 - N首」下；信息缺失时自动省略对应段
                 </div>
             </template>
         </n-form-item>

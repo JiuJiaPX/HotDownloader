@@ -81,6 +81,9 @@ impl DownloadEngine {
         track: u32,
         disc: u32,
         track_total: u32,
+        album_artist: String,
+        album_publish_time: String,
+        album_song_count: u32,
     ) {
         let controller = TaskController {
             cancel_token: CancellationToken::new(),
@@ -115,6 +118,9 @@ impl DownloadEngine {
                 track,
                 disc,
                 track_total,
+                album_artist,
+                album_publish_time,
+                album_song_count,
             },
             final_path: controller.final_path.clone(), // 共享路径
         };

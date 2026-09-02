@@ -82,6 +82,9 @@ export async function checkDownloadPath(params: {
     track?: number
     disc?: number
     trackTotal?: number
+    albumArtist?: string
+    albumPublishTime?: string
+    albumSongCount?: number
 }): Promise<{ original_path: string; exists: boolean; suggested_path: string; is_saf: boolean }> {
     const json = await invoke<string>('check_download_path', {
         songId: params.songId,
@@ -96,6 +99,9 @@ export async function checkDownloadPath(params: {
         track: params.track ?? 0,
         disc: params.disc ?? 0,
         trackTotal: params.trackTotal ?? 0,
+        albumArtist: params.albumArtist ?? '',
+        albumPublishTime: params.albumPublishTime ?? '',
+        albumSongCount: params.albumSongCount ?? 0,
     })
     return JSON.parse(json)
 }

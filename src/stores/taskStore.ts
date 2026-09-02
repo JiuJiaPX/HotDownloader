@@ -60,7 +60,15 @@ export const useTaskStore = defineStore('tasks', () => {
     }
 
     // ---- 任务操作 ----
-    function addTask(task: TaskRecord, savePath?: string) {
+    function addTask(
+        task: TaskRecord,
+        savePath?: string,
+        albumMeta?: {
+            albumArtist?: string
+            albumPublishTime?: string
+            albumSongCount?: number
+        }
+    ) {
         tasks.value.push(task)
         saveTasks()
         invoke('add_download_task', {
@@ -80,6 +88,9 @@ export const useTaskStore = defineStore('tasks', () => {
             track: task.track ?? 0,
             disc: task.disc ?? 0,
             trackTotal: task.trackTotal ?? 0,
+            albumArtist: albumMeta?.albumArtist ?? '',
+            albumPublishTime: albumMeta?.albumPublishTime ?? '',
+            albumSongCount: albumMeta?.albumSongCount ?? 0,
         }).catch((e: any) => {
             console.error('添加任务失败:', e)
             notify()?.error({ title: '添加任务失败', description: e?.message || String(e), duration: 3000 })

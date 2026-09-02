@@ -33,6 +33,9 @@ pub async fn add_download_task(
     track: Option<u32>,
     disc: Option<u32>,
     track_total: Option<u32>,
+    album_artist: Option<String>,
+    album_publish_time: Option<String>,
+    album_song_count: Option<u32>,
 ) -> Result<(), String> {
     let engine = app.state::<DownloadEngine>();
     engine
@@ -53,6 +56,9 @@ pub async fn add_download_task(
             track.unwrap_or(0),
             disc.unwrap_or(0),
             track_total.unwrap_or(0),
+            album_artist.unwrap_or_default(),
+            album_publish_time.unwrap_or_default(),
+            album_song_count.unwrap_or(0),
         )
         .await;
     Ok(())
@@ -113,6 +119,9 @@ pub async fn check_download_path(
     track: Option<u32>,
     disc: Option<u32>,
     track_total: Option<u32>,
+    album_artist: Option<String>,
+    album_publish_time: Option<String>,
+    album_song_count: Option<u32>,
 ) -> Result<String, String> {
     // 构建 SongInfo 对象，quality 必须传入，否则命名模板中 {quality} 会出错
     let song_info = crate::download::task::SongInfo {
@@ -124,6 +133,9 @@ pub async fn check_download_path(
         track: track.unwrap_or(0),
         disc: disc.unwrap_or(0),
         track_total: track_total.unwrap_or(0),
+        album_artist: album_artist.unwrap_or_default(),
+        album_publish_time: album_publish_time.unwrap_or_default(),
+        album_song_count: album_song_count.unwrap_or(0),
     };
     // 先获取下载设置，再调用路径解析函数，避免函数内部再次读取设置
     let (dir_setting, template_setting, saf_uri_setting, _, _, download_to_album_folder) =

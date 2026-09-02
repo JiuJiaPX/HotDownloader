@@ -137,15 +137,44 @@ pub(crate) fn music_library_base_dir(app: &AppHandle) -> String {
     music_dir.join(product).to_string_lossy().to_string()
 }
 
-/// 将专辑名清洗为合法文件夹名；为空时回退为「未知专辑」。
-fn album_folder_name(album: &str) -> String {
-    let sanitized = filename::sanitize_name(album);
-    let trimmed = sanitized.trim();
-    if trimmed.is_empty() {
+/// 生成专辑子文件夹名：专辑名 - 歌手 - 发布时间 - N首（缺省字段自动省略）。
+fn album_folder_name(info: &SongInfo) -> String {
+    let album = filename::sanitize_name(info.album.trim());
+    let album = if album.is_empty() {
         "未知专辑".to_string()
     } else {
-        trimmed.to_string()
+        album
+    };
+
+    let mut parts = vec![album];
+
+    let artist_source = if !info.album_artist.trim().is_empty() {
+        info.album_artist.trim()
+    } else {
+        info.artist.trim()
+    };
+    let artist = filename::sanitize_name(artist_source);
+    if !artist.is_empty() {
+        parts.push(artist);
     }
+
+    let publish = filename::sanitize_name(info.album_publish_time.trim());
+    if !publish.is_empty() {
+        parts.push(publish);
+    }
+
+    let count = if info.album_song_count > 0 {
+        info.album_song_count
+    } else if info.track_total > 0 {
+        info.track_total
+    } else {
+        0
+    };
+    if count > 0 {
+        parts.push(format!("{}首", count));
+    }
+
+    parts.join(" - ")
 }
 
 /// 解析最终下载路径。
@@ -170,7 +199,7 @@ pub(crate) fn resolve_download_path(
     if dir_setting == "saf://" && cfg!(target_os = "android") && saf_uri_setting.is_some() {
         // SAF 相对路径必须使用 `/`，插件会按路径递归创建子目录
         let relative = if download_to_album_folder {
-            format!("{}/{}", album_folder_name(&song_info.album), file_name)
+            format!("{}/{}", album_folder_name(song_info), file_name)
         } else {
             file_name
         };
@@ -178,7 +207,7 @@ pub(crate) fn resolve_download_path(
     } else {
         let full_path = if download_to_album_folder {
             Path::new(dir_setting)
-                .join(album_folder_name(&song_info.album))
+                .join(album_folder_name(song_info))
                 .join(file_name)
         } else {
             Path::new(dir_setting).join(file_name)

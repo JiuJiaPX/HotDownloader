@@ -2,7 +2,7 @@ import { h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useNotification, NButton } from 'naive-ui'
 import { platform } from '@tauri-apps/plugin-os'
-import type { Quality, SongInfo, QualityItem } from '../types'
+import type { Quality, SongInfo, QualityItem, TaskRecord } from '../types'
 import { getDowngradeCandidates } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTaskStore } from '../stores/taskStore'
@@ -19,6 +19,27 @@ export function useDownloadActions() {
 
     function generateTaskId(): string {
         return Date.now().toString(36) + Math.random().toString(36).substring(2)
+    }
+
+    function albumFolderLabel(song: SongInfo): string {
+        const parts: string[] = []
+        const album = song.album?.trim() || '未知专辑'
+        parts.push(album)
+        const artist = (song.albumArtist?.trim() || song.artist?.trim())
+        if (artist) parts.push(artist)
+        const publish = song.albumPublishTime?.trim()
+        if (publish) parts.push(publish)
+        const count = song.albumSongCount || song.trackTotal || 0
+        if (count > 0) parts.push(`${count}首`)
+        return parts.join(' - ')
+    }
+
+    function invokeAddTask(task: TaskRecord, savePath: string, song: SongInfo) {
+        taskStore.addTask(task, savePath, {
+            albumArtist: song.albumArtist,
+            albumPublishTime: song.albumPublishTime,
+            albumSongCount: song.albumSongCount,
+        })
     }
 
     /** 弹出品质选择弹窗，返回选中的品质标签 */
@@ -147,6 +168,9 @@ export function useDownloadActions() {
             track: song.track ?? 0,
             disc: song.disc ?? 0,
             trackTotal: song.trackTotal ?? 0,
+            albumArtist: song.albumArtist ?? '',
+            albumPublishTime: song.albumPublishTime ?? '',
+            albumSongCount: song.albumSongCount ?? 0,
         });
 
         const pinnedPath = options?.useMusicLibrary ? pathInfo.original_path : ''
@@ -234,7 +258,7 @@ export function useDownloadActions() {
             if (savePath === null) return;
 
             const taskId = generateTaskId()
-            taskStore.addTask({
+            invokeAddTask({
                 id: taskId,
                 songId: song.id,
                 songMid: song.mid,
@@ -253,7 +277,7 @@ export function useDownloadActions() {
                 downloaded: 0,
                 retryCount: 0,
                 addedAt: Date.now(),
-            }, savePath)
+            }, savePath, song)
 
             if (settingsStore.settings.jumpToTask) {
                 router.push('/task')
@@ -360,7 +384,7 @@ export function useDownloadActions() {
                 if (savePath === null) continue;
 
                 const taskId = generateTaskId()
-                taskStore.addTask({
+                invokeAddTask({
                     id: taskId,
                     songId: song.id,
                     songMid: song.mid,
@@ -379,19 +403,19 @@ export function useDownloadActions() {
                     downloaded: 0,
                     retryCount: 0,
                     addedAt: Date.now(),
-                }, savePath)
+                }, savePath, song)
             }
 
             if (errorCount > 0) {
                 notification.warning({ title: '批量下载', description: `${errorCount} 首歌曲无可用音质，已标记为错误` })
             }
             if (options?.useMusicLibrary) {
-                const albumName = songs[0]?.album?.trim() || '未知专辑'
+                const folderLabel = albumFolderLabel(songs[0])
                 notification.success({
                     title: '整张专辑下载',
                     description: isAndroid
-                        ? `将保存到已选下载目录下的「${albumName}」文件夹`
-                        : `将保存到本机音乐库 / HotDownloader / ${albumName}`,
+                        ? `将保存到已选下载目录下的「${folderLabel}」文件夹`
+                        : `将保存到本机音乐库 / HotDownloader / ${folderLabel}`,
                     duration: 4000,
                 })
             }

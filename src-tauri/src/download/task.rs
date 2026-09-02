@@ -41,10 +41,13 @@ pub struct SongInfo {
     pub artist: String,
     pub album: String,
     pub quality: String,
-    pub cover_url: String, // 封面 URL，用于写入音频标签
-    pub track: u32,        // 专辑内曲序，0 表示未知
-    pub disc: u32,         // 碟号，0 表示未知
-    pub track_total: u32,  // 专辑总曲目数，0 表示未知
+    pub cover_url: String,          // 封面 URL，用于写入音频标签
+    pub track: u32,                 // 专辑内曲序，0 表示未知
+    pub disc: u32,                  // 碟号，0 表示未知
+    pub track_total: u32,           // 专辑总曲目数，0 表示未知
+    pub album_artist: String,       // 专辑歌手，空则回退为 artist
+    pub album_publish_time: String, // 专辑发布时间
+    pub album_song_count: u32,      // 专辑歌曲数，0 则回退 track_total
 }
 
 /// 单个任务的上下文信息
