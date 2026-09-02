@@ -2,7 +2,7 @@ import { h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useNotification, NButton } from 'naive-ui'
 import type { Quality, SongInfo, QualityItem } from '../types'
-import { QUALITY_DOWNGRADE_ORDER } from '../types'
+import { getDowngradeCandidates } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useTaskStore } from '../stores/taskStore'
 import QualitySelector from '../components/search/QualitySelector.vue'
@@ -100,9 +100,8 @@ export function useDownloadActions() {
     }
 
     /**
-     * 根据期望品质和歌曲可用品质列表，返回实际可用的品质项（含 filename）
-     * 若无法满足且开启自动降级，则按降级顺序选择第一个可用品质
-     * 若仍无可用品质，返回 null
+     * 根据期望品质和歌曲可用品质列表，返回实际可用的品质项（含 filename）。
+     * 若无法满足且开启自动降级，只选择比目标更低的可用音质，不会升级。
      */
     function resolveQualityForSong(
         song: SongInfo,
@@ -112,7 +111,7 @@ export function useDownloadActions() {
         if (direct) return direct
 
         if (settingsStore.settings.autoDowngrade) {
-            for (const fallback of QUALITY_DOWNGRADE_ORDER) {
+            for (const fallback of getDowngradeCandidates(desiredQuality)) {
                 const found = song.qualities.find((q) => q.quality === fallback)
                 if (found) return found
             }
@@ -120,12 +119,19 @@ export function useDownloadActions() {
         return null
     }
 
+    type DownloadOptions = {
+        /** 保存到本机音乐库 Music/<软件名>/专辑名 */
+        useMusicLibrary?: boolean
+    }
+
     /**
-     * 处理重复文件策略，返回 savePath 或 null（取消）
+     * 处理重复文件策略，返回 savePath 或 null（取消）。
+     * 整张专辑下载必须回传具体路径，否则后端会落到普通下载目录。
      */
     async function handleDuplicate(
         song: SongInfo,
-        resolved: QualityItem
+        resolved: QualityItem,
+        options?: DownloadOptions
     ): Promise<string | null> {
         const pathInfo = await musicApi.checkDownloadPath({
             songId: song.id,
@@ -136,10 +142,16 @@ export function useDownloadActions() {
             coverUrl: song.coverUrl,
             qualityFilename: resolved.filename,
             quality: resolved.quality,
+            useMusicLibrary: options?.useMusicLibrary,
+            track: song.track ?? 0,
+            disc: song.disc ?? 0,
+            trackTotal: song.trackTotal ?? 0,
         });
 
+        const pinnedPath = options?.useMusicLibrary ? pathInfo.original_path : ''
+
         if (!pathInfo.exists) {
-            return '';
+            return pinnedPath;
         }
 
         const strategy = settingsStore.settings.duplicateStrategy || 'ask';
@@ -154,7 +166,7 @@ export function useDownloadActions() {
         } else if (strategy === 'rename') {
             return pathInfo.suggested_path;
         } else if (strategy === 'overwrite') {
-            return '';
+            return pinnedPath;
         } else {
             // ask
             const action = await askDuplicateAction(song.title);
@@ -168,7 +180,7 @@ export function useDownloadActions() {
             } else if (action === 'rename') {
                 return pathInfo.suggested_path;
             } else {
-                return '';
+                return pinnedPath;
             }
         }
     }
@@ -232,6 +244,9 @@ export function useDownloadActions() {
                 mediaMid: song.mediaMid,
                 filename: resolved.filename,
                 quality: resolved.quality,
+                track: song.track ?? 0,
+                disc: song.disc ?? 0,
+                trackTotal: song.trackTotal ?? 0,
                 status: 'waiting',
                 fileSize: resolved.size,
                 downloaded: 0,
@@ -248,7 +263,7 @@ export function useDownloadActions() {
         }
     }
 
-    async function batchDownload(songs: SongInfo[]): Promise<void> {
+    async function batchDownload(songs: SongInfo[], options?: DownloadOptions): Promise<void> {
         try {
             let quality: Quality
             if (settingsStore.settings.defaultQuality === 'ask') {
@@ -324,7 +339,7 @@ export function useDownloadActions() {
                     continue
                 }
 
-                const savePath = await handleDuplicate(song, resolved);
+                const savePath = await handleDuplicate(song, resolved, options);
                 if (savePath === null) continue;
 
                 const taskId = generateTaskId()
@@ -339,6 +354,9 @@ export function useDownloadActions() {
                     mediaMid: song.mediaMid,
                     filename: resolved.filename,
                     quality: resolved.quality,
+                    track: song.track ?? 0,
+                    disc: song.disc ?? 0,
+                    trackTotal: song.trackTotal ?? 0,
                     status: 'waiting',
                     fileSize: resolved.size,
                     downloaded: 0,
@@ -349,6 +367,14 @@ export function useDownloadActions() {
 
             if (errorCount > 0) {
                 notification.warning({ title: '批量下载', description: `${errorCount} 首歌曲无可用音质，已标记为错误` })
+            }
+            if (options?.useMusicLibrary) {
+                const albumName = songs[0]?.album?.trim() || '未知专辑'
+                notification.success({
+                    title: '整张专辑下载',
+                    description: `将保存到本机音乐库 / HotDownloader / ${albumName}`,
+                    duration: 4000,
+                })
             }
 
             if (settingsStore.settings.jumpToTask) {

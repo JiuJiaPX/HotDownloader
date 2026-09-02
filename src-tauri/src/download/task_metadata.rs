@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{Picture, PictureType};
-use lofty::tag::{ItemKey, Tag, TagType};
+use lofty::tag::{Accessor, ItemKey, Tag, TagType};
 use tauri::AppHandle;
 use tauri_plugin_android_fs::{AndroidFsExt, FileAccessMode, FsUri};
 
@@ -23,6 +23,9 @@ pub(crate) async fn write_metadata(
     saf_file_uri: Option<String>,
     cover_url: &str,
     lyric: Option<LyricResponse>,
+    track: u32,
+    disc: u32,
+    track_total: u32,
 ) {
     // 1. 从已获取的歌词响应中提取歌词内容：优先逐字歌词（elrc），其次普通歌词（lrc）
     let lyric_text = lyric.and_then(|resp| {
@@ -44,8 +47,8 @@ pub(crate) async fn write_metadata(
         None
     };
 
-    if lyric_text.is_none() && cover_bytes.is_none() {
-        log::info!("无可用歌词或封面，跳过 metadata 写入");
+    if lyric_text.is_none() && cover_bytes.is_none() && track == 0 {
+        log::info!("无可用歌词、封面或曲序，跳过 metadata 写入");
         return;
     }
 
@@ -166,6 +169,17 @@ pub(crate) async fn write_metadata(
         // 移除旧的封面图片，避免重复
         tag.remove_picture_type(PictureType::CoverFront);
         tag.push_picture(picture);
+    }
+
+    // 写入曲序，供资源管理器「#」列与播放器按专辑顺序排列
+    if track > 0 {
+        tag.set_track(track);
+        if track_total > 0 {
+            tag.set_track_total(track_total);
+        }
+    }
+    if disc > 0 {
+        tag.set_disk(disc);
     }
 
     // 保存 metadata

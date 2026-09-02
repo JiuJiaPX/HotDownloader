@@ -12,12 +12,19 @@ pub fn apply_template(
     title: &str,
     album: &str,
     quality: &str,
+    track: u32,
 ) -> String {
+    let track_str = if track > 0 {
+        format!("{:02}", track)
+    } else {
+        String::new()
+    };
     template
         .replace("{song}", title)
         .replace("{artist}", artist)
         .replace("{album}", album)
         .replace("{quality}", quality)
+        .replace("{track}", &track_str)
 }
 
 /// 生成最终文件名（不含扩展名）
@@ -28,6 +35,7 @@ pub fn build_filename(template: &str, info: &SongInfo) -> String {
         &info.title,
         &info.album,
         &info.quality,
+        info.track,
     );
     let sanitized = sanitize_name(&name);
     // 若过滤后为空，回退到默认模板
@@ -38,6 +46,7 @@ pub fn build_filename(template: &str, info: &SongInfo) -> String {
             &info.title,
             &info.album,
             &info.quality,
+            info.track,
         );
         let fallback_sanitized = sanitize_name(&fallback);
         if fallback_sanitized.trim().is_empty() {

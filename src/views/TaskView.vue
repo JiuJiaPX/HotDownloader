@@ -1,17 +1,32 @@
 <template>
     <div class="task-view">
-        <TaskTabs v-model:activeTab="activeTab" :counts="tabCounts" />
+        <div class="task-header">
+            <TaskTabs v-model:activeTab="activeTab" :counts="tabCounts" />
+        </div>
 
-        <TaskTable :tasks="filteredTasks" :selectedRowKeys="selectedRowKeys"
-            @update:selectedRowKeys="selectedRowKeys = $event" @action="handleAction" />
+        <div class="task-table-wrap">
+            <TaskTable :tasks="filteredTasks" :selectedRowKeys="selectedRowKeys"
+                @update:selectedRowKeys="selectedRowKeys = $event" @action="handleAction" />
+        </div>
 
-        <TaskBatchActions :selectedCount="selectedRowKeys.length" @clear="handleBatchClear" />
+        <TaskBatchActions :selectedCount="selectedRowKeys.length" :canClearFinished="canClearFinished"
+            @clear="handleBatchClear" @clear-completed="openClearModal" />
+
+        <n-modal v-model:show="showClearModal" preset="dialog" title="清除已完成任务" positive-text="确定"
+            negative-text="取消" @positive-click="confirmClearFinished">
+            <n-space vertical :size="12">
+                <span>将从任务列表中移除已完成的任务。</span>
+                <n-checkbox v-model:checked="clearDeleteFile">同时删除文件</n-checkbox>
+                <n-checkbox v-model:checked="clearFailed">同时清除失败的下载项</n-checkbox>
+            </n-space>
+        </n-modal>
     </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { NModal, NCheckbox, NSpace } from 'naive-ui'
 import { useTaskStore } from '../stores/taskStore'
 import { useDownloadActions } from '../composables/useDownloadActions'
 import TaskTabs from '../components/task/TaskTabs.vue'
@@ -23,6 +38,10 @@ const { retryTask } = useDownloadActions()
 
 const activeTab = ref('all')
 const selectedRowKeys = ref<string[]>([])
+
+const showClearModal = ref(false)
+const clearDeleteFile = ref(false)
+const clearFailed = ref(false)
 
 const tabCounts = computed(() => {
     const counts = {
@@ -44,6 +63,10 @@ const tabCounts = computed(() => {
     return counts
 })
 
+const canClearFinished = computed(
+    () => tabCounts.value.completed > 0 || tabCounts.value.error > 0
+)
+
 const filteredTasks = computed(() => {
     const all = taskStore.tasks.filter((t) => {
         // 显式读取进度相关字段，建立响应式依赖
@@ -53,6 +76,28 @@ const filteredTasks = computed(() => {
     });
     return all;
 })
+
+function openClearModal() {
+    clearDeleteFile.value = false
+    clearFailed.value = false
+    showClearModal.value = true
+}
+
+async function confirmClearFinished() {
+    const ids = taskStore.tasks
+        .filter((t) => {
+            if (t.status === 'completed') return true
+            if (clearFailed.value && t.status === 'error') return true
+            return false
+        })
+        .map((t) => t.id)
+
+    const deleteFile = clearDeleteFile.value
+    for (const taskId of ids) {
+        await taskStore.removeTask(taskId, deleteFile)
+    }
+    selectedRowKeys.value = selectedRowKeys.value.filter((id) => !ids.includes(id))
+}
 
 async function handleAction(action: string, taskId: string, extra?: any) {
     switch (action) {
@@ -112,5 +157,16 @@ async function handleBatchClear(deleteFile: boolean) {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+}
+
+.task-header {
+    flex-shrink: 0;
+}
+
+.task-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
 }
 </style>

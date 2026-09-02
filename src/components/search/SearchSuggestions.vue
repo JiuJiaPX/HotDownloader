@@ -23,7 +23,7 @@
         <div v-if="data.album.length > 0" class="suggest-group">
             <div class="group-title">专辑</div>
             <div v-for="(item, index) in data.album" :key="item.mid ?? item.id ?? `album-${index}`" class="suggest-item"
-                @click="handleSelect(item)">
+                @click="handleAlbumSelect(item)">
                 <span class="item-name">{{ item.name }}</span>
                 <span class="item-singer">- {{ item.singer }}</span>
             </div>
@@ -51,6 +51,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (e: 'select', keyword: string): void
+    (e: 'select-album', item: SearchSuggestionItem): void
 }>()
 
 function handleSelect(item: SearchSuggestionItem) {
@@ -58,6 +59,14 @@ function handleSelect(item: SearchSuggestionItem) {
     if (item.name) {
         emit('select', item.name)
     }
+}
+
+function handleAlbumSelect(item: SearchSuggestionItem) {
+    if (item.mid || item.id) {
+        emit('select-album', item)
+        return
+    }
+    handleSelect(item)
 }
 
 const hasAny = computed(

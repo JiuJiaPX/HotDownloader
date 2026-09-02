@@ -18,6 +18,21 @@ export const ALL_QUALITY_ORDER: string[] = [
 /** 降级顺序：从高到低 */
 export const QUALITY_DOWNGRADE_ORDER: string[] = [...ALL_QUALITY_ORDER].reverse()
 
+/**
+ * 返回比目标音质更低的候选列表（从高到低）。
+ * 自动降级只应选用更低音质，不能升到臻品母带等更高规格。
+ */
+export function getDowngradeCandidates(desiredQuality: string): string[] {
+    const idx = ALL_QUALITY_ORDER.indexOf(desiredQuality)
+    if (idx === -1) {
+        return QUALITY_DOWNGRADE_ORDER
+    }
+    if (idx === 0) {
+        return []
+    }
+    return ALL_QUALITY_ORDER.slice(0, idx).reverse()
+}
+
 export type Quality = string  // 不再限制字面量，兼容所有后端标签
 
 export type TaskStatus = 'waiting' | 'downloading' | 'paused' | 'completed' | 'error' | 'processing'
@@ -34,6 +49,8 @@ export interface Settings {
     safFolderName?: string
     writeMetadata: boolean
     downloadLrc: boolean
+    // 是否将歌曲保存到以专辑名命名的子文件夹
+    downloadToAlbumFolder: boolean
     // 登录相关字段，可选，未登录时不设置
     loginUin?: string
     authst?: string
@@ -64,6 +81,9 @@ export interface SongInfo {
     coverUrl: string
     mediaMid: string
     qualities: QualityItem[]
+    track?: number
+    disc?: number
+    trackTotal?: number
 }
 
 // 搜索结果完整返回
@@ -85,6 +105,29 @@ export interface PlaylistInfo {
 // 歌单接口完整返回
 export interface PlaylistSongsResponse {
     playlist: PlaylistInfo
+    songs: SongInfo[]
+}
+
+// 专辑基本信息
+export interface AlbumInfo {
+    id: number
+    mid: string
+    name: string
+    artist: string
+    coverUrl: string
+    songCount: number
+    publishTime: string
+}
+
+// 专辑搜索结果
+export interface AlbumSearchResponse {
+    albums: AlbumInfo[]
+    has_more: boolean
+}
+
+// 专辑详情与曲目
+export interface AlbumSongsResponse {
+    album: AlbumInfo
     songs: SongInfo[]
 }
 
@@ -126,6 +169,9 @@ export interface TaskRecord {
     mediaMid: string           // 用于后续可能的操作
     filename: string           // 实际下载的品质文件名
     quality: Quality           // 实际选择的品质标签
+    track?: number
+    disc?: number
+    trackTotal?: number
     status: TaskStatus
     errorMsg?: string
     filePath?: string
@@ -168,6 +214,7 @@ export const DEFAULT_SETTINGS: Settings = {
     jumpToTask: true,
     writeMetadata: false,
     downloadLrc: false,
+    downloadToAlbumFolder: false,
     loginUin: '',
     authst: '',
     refreshToken: '',

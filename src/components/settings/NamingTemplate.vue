@@ -4,7 +4,7 @@
             @update:value="(val) => (settingsStore.settings.namingTemplate = val)" placeholder="{song} - {artist}" />
         <template #feedback>
             <div class="template-help">
-                可使用变量：<code>{song}</code>（歌名）、<code>{artist}</code>（歌手）、<code>{album}</code>（专辑）、<code>{quality}</code>（音质）<br />
+                可使用变量：<code>{song}</code>（歌名）、<code>{artist}</code>（歌手）、<code>{album}</code>（专辑）、<code>{quality}</code>（音质）、<code>{track}</code>（曲序号，可选）<br />
                 若替换后结果为空或仅含非法字符，将自动使用默认模板“歌名 - 歌手”
             </div>
             <div class="template-preview" v-if="exampleFilename">
@@ -26,7 +26,8 @@ const exampleSong = {
     song: '晴天',
     artist: '周杰伦',
     album: '叶惠美',
-    quality: 'flac'
+    quality: 'flac',
+    track: '03'
 }
 
 // 过滤非法字符的函数（与后端 sanitize_name 一致）
@@ -40,6 +41,7 @@ const exampleFilename = computed(() => {
         .replaceAll('{artist}', exampleSong.artist)
         .replaceAll('{album}', exampleSong.album)
         .replaceAll('{quality}', exampleSong.quality)
+        .replaceAll('{track}', exampleSong.track)
 
     const sanitized = sanitize(name).trim()
     if (!sanitized) {

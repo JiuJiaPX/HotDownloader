@@ -49,7 +49,18 @@ pub(crate) async fn write_lrc_file(
         }
     };
 
-    let lrc_file_name = format!("{}.lrc", stem);
+    // SAF 相对路径可能包含专辑子目录，歌词文件需与歌曲放在同一文件夹
+    let lrc_file_name = match song_name.parent() {
+        Some(parent)
+            if !parent.as_os_str().is_empty() && parent != Path::new(".") =>
+        {
+            parent
+                .join(format!("{}.lrc", stem))
+                .to_string_lossy()
+                .replace('\\', "/")
+        }
+        _ => format!("{}.lrc", stem),
+    };
     let api = app_handle.android_fs();
 
     // 尝试解析已存在的 LRC 文件，若存在则打开可写并清空；否则创建新文件

@@ -42,6 +42,9 @@ pub struct SongInfo {
     pub album: String,
     pub quality: String,
     pub cover_url: String, // 封面 URL，用于写入音频标签
+    pub track: u32,         // 专辑内曲序，0 表示未知
+    pub disc: u32,          // 碟号，0 表示未知
+    pub track_total: u32,  // 专辑总曲目数，0 表示未知
 }
 
 /// 单个任务的上下文信息
@@ -92,6 +95,7 @@ pub async fn download_task(
         saf_uri_setting,
         write_metadata_enabled,
         download_lrc_enabled,
+        download_to_album_folder,
     ) = get_download_settings(&app_handle).await;
 
     // 1. 构建最终保存路径（只需一次）
@@ -104,6 +108,7 @@ pub async fn download_task(
             saf_uri_setting.as_deref(),
             &ctx.song_info,
             &ctx.quality_filename,
+            download_to_album_folder,
         )
     };
 
@@ -475,16 +480,28 @@ pub async fn download_task(
             None
         };
 
-        // 写入音频文件 metadata（歌词/封面），错误处理在函数内部完成
-        if write_metadata_enabled {
+        // 写入音频文件 metadata（歌词/封面/曲序）。
+        // 曲序即使未开启「写入标签」也要写入，否则资源管理器「#」列为空。
+        if write_metadata_enabled || ctx.song_info.track > 0 {
             write_metadata(
                 &app_handle,
                 &ctx.task_id,
                 &download_dir,
                 is_saf,
                 saf_file_uri.clone(),
-                &ctx.song_info.cover_url,
-                lyric_resp.clone(),
+                if write_metadata_enabled {
+                    &ctx.song_info.cover_url
+                } else {
+                    ""
+                },
+                if write_metadata_enabled {
+                    lyric_resp.clone()
+                } else {
+                    None
+                },
+                ctx.song_info.track,
+                ctx.song_info.disc,
+                ctx.song_info.track_total,
             )
             .await;
         }

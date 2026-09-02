@@ -1,3 +1,4 @@
+pub(crate) mod album;
 pub(crate) mod client;
 pub(crate) mod download;
 pub(crate) mod login;

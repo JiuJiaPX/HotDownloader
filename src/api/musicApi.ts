@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { SongInfo, SearchResponse, SearchSuggestionData, PlaylistSongsResponse, UpdateInfo, LyricResponse } from '../types'
+import type { SongInfo, SearchResponse, SearchSuggestionData, PlaylistSongsResponse, AlbumSearchResponse, AlbumSongsResponse, UpdateInfo, LyricResponse } from '../types'
 
 export async function searchSongs(
     keyword: string,
@@ -12,6 +12,20 @@ export async function searchSongs(
         return { songs: parsed as unknown as SongInfo[], has_more: false }
     }
     return parsed
+}
+
+export async function searchAlbums(
+    keyword: string,
+    page: number = 1,
+    limit: number = 20
+): Promise<AlbumSearchResponse> {
+    const json = await invoke<string>('search_albums', { keyword, page, limit })
+    return JSON.parse(json) as AlbumSearchResponse
+}
+
+export async function fetchAlbumSongs(albumMid: string): Promise<AlbumSongsResponse> {
+    const json = await invoke<string>('fetch_album_songs', { albumMid })
+    return JSON.parse(json) as AlbumSongsResponse
 }
 
 export async function fetchDownloadLink(
@@ -64,6 +78,10 @@ export async function checkDownloadPath(params: {
     coverUrl: string
     qualityFilename: string
     quality: string
+    useMusicLibrary?: boolean
+    track?: number
+    disc?: number
+    trackTotal?: number
 }): Promise<{ original_path: string; exists: boolean; suggested_path: string; is_saf: boolean }> {
     const json = await invoke<string>('check_download_path', {
         songId: params.songId,
@@ -74,6 +92,10 @@ export async function checkDownloadPath(params: {
         coverUrl: params.coverUrl,
         qualityFilename: params.qualityFilename,
         quality: params.quality,
+        useMusicLibrary: params.useMusicLibrary ?? false,
+        track: params.track ?? 0,
+        disc: params.disc ?? 0,
+        trackTotal: params.trackTotal ?? 0,
     })
     return JSON.parse(json)
 }

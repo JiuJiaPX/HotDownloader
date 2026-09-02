@@ -24,6 +24,9 @@ use serde_json::{json, Value};
 ///   - `coverUrl`: 封面图片 URL（优先专辑封面，其次歌手头像，均无则为空字符串）
 ///   - `mediaMid`: 媒体文件 mid（用于下载链接生成）
 ///   - `qualities`: 可用品质列表（由 [`build_qualities`] 生成）
+///   - `track`: 专辑曲序（`index_album` 等），未知为 0
+///   - `disc`: 碟号，未知为 0
+///   - `trackTotal`: 专辑总曲目数（专辑接口会补全）
 /// - `None`：当歌曲缺少 `mid` 或 `media_mid` 时返回 `None`，表示该歌曲无法解析或不可下载。
 pub(crate) fn parse_song(song: &Value) -> Option<Value> {
     // 歌曲唯一标识（使用 mid），缺失则跳过该歌曲
@@ -98,6 +101,13 @@ pub(crate) fn parse_song(song: &Value) -> Option<Value> {
     // 构建可用品质列表（基于 file 和 vs 字段）
     let qualities = build_qualities(&song["file"], &song["vs"]);
 
+    // 专辑曲序：QQ 音乐常用 index_album（从 1 起）
+    let track = positive_u32(
+        song,
+        &["index_album", "track_number", "trackNumber", "track", "no"],
+    );
+    let disc = positive_u32(song, &["index_cd", "disc_number", "discNumber", "disc"]);
+
     Some(json!({
         "id": song_id,
         "mid": mid,
@@ -106,8 +116,26 @@ pub(crate) fn parse_song(song: &Value) -> Option<Value> {
         "album": album_name,
         "coverUrl": cover_url,
         "mediaMid": media_mid,
-        "qualities": qualities
+        "qualities": qualities,
+        "track": track,
+        "disc": disc,
+        "trackTotal": 0
     }))
+}
+
+fn positive_u32(item: &Value, keys: &[&str]) -> u32 {
+    for key in keys {
+        let n = item[*key]
+            .as_u64()
+            .or_else(|| item[*key].as_i64().filter(|n| *n > 0).map(|n| n as u64))
+            .or_else(|| item[*key].as_str().and_then(|s| s.parse::<u64>().ok()));
+        if let Some(n) = n {
+            if n > 0 && n < 10000 {
+                return n as u32;
+            }
+        }
+    }
+    0
 }
 
 /// 根据歌曲的 `file` 和 `vs` 字段生成可用品质列表。

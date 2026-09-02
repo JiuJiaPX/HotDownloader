@@ -8,7 +8,7 @@ use crate::utils::filename;
 /// 获取下载目录（绝对路径）及文件命名模板
 pub(crate) async fn get_download_settings(
     app_handle: &AppHandle,
-) -> (String, String, Option<String>, bool, bool) {
+) -> (String, String, Option<String>, bool, bool, bool) {
     use crate::storage::store_wrapper;
 
     let default_dir = crate::commands::file_ops::get_default_download_dir_impl(app_handle);
@@ -63,13 +63,61 @@ pub(crate) async fn get_download_settings(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // 是否将歌曲保存到以专辑名命名的子文件夹
+    let download_to_album_folder = settings
+        .get("downloadToAlbumFolder")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     (
         dir,
         template,
         saf_folder_uri,
         write_metadata_enabled,
         download_lrc_enabled,
+        download_to_album_folder,
     )
+}
+
+/// 本机音乐库下的软件目录：`Music/<productName>`。
+/// 整张专辑下载会再拼上专辑名子文件夹。
+pub(crate) fn music_library_base_dir(app: &AppHandle) -> String {
+    let product = app
+        .config()
+        .product_name
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("HotDownloader");
+
+    let music_dir = {
+        #[cfg(target_os = "android")]
+        {
+            if let Ok(ext) = std::env::var("EXTERNAL_STORAGE") {
+                Path::new(&ext).join("Music")
+            } else {
+                Path::new("/storage/emulated/0/Music").to_path_buf()
+            }
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            dirs::audio_dir()
+                .or_else(|| dirs::home_dir().map(|h| h.join("Music")))
+                .unwrap_or_else(|| Path::new(".").to_path_buf())
+        }
+    };
+
+    music_dir.join(product).to_string_lossy().to_string()
+}
+
+/// 将专辑名清洗为合法文件夹名；为空时回退为「未知专辑」。
+fn album_folder_name(album: &str) -> String {
+    let sanitized = filename::sanitize_name(album);
+    let trimmed = sanitized.trim();
+    if trimmed.is_empty() {
+        "未知专辑".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// 解析最终下载路径。
@@ -81,24 +129,32 @@ pub(crate) fn resolve_download_path(
     saf_uri_setting: Option<&str>,
     song_info: &SongInfo,
     quality_filename: &str,
+    download_to_album_folder: bool,
 ) -> (bool, String, Option<String>) {
+    let fname = filename::build_filename(template_setting, song_info);
+    let raw_ext = Path::new(quality_filename)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("flac");
+    let ext = map_decrypted_extension(raw_ext);
+    let file_name = format!("{}.{}", fname, ext);
+
     if dir_setting == "saf://" && cfg!(target_os = "android") && saf_uri_setting.is_some() {
-        let fname = filename::build_filename(template_setting, song_info);
-        let raw_ext = Path::new(quality_filename)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("flac");
-        let ext = map_decrypted_extension(raw_ext);
-        let file_name = format!("{}.{}", fname, ext);
-        (true, file_name, saf_uri_setting.map(|s| s.to_string()))
+        // SAF 相对路径必须使用 `/`，插件会按路径递归创建子目录
+        let relative = if download_to_album_folder {
+            format!("{}/{}", album_folder_name(&song_info.album), file_name)
+        } else {
+            file_name
+        };
+        (true, relative, saf_uri_setting.map(|s| s.to_string()))
     } else {
-        let fname = filename::build_filename(template_setting, song_info);
-        let raw_ext = Path::new(quality_filename)
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("flac");
-        let ext = map_decrypted_extension(raw_ext);
-        let full_path = Path::new(dir_setting).join(format!("{}.{}", fname, ext));
+        let full_path = if download_to_album_folder {
+            Path::new(dir_setting)
+                .join(album_folder_name(&song_info.album))
+                .join(file_name)
+        } else {
+            Path::new(dir_setting).join(file_name)
+        };
         (false, full_path.to_string_lossy().to_string(), None)
     }
 }

@@ -104,6 +104,17 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // 关闭主窗口时退出整个进程，避免仅隐藏窗口后托盘仍在后台运行
+            #[cfg(desktop)]
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Destroyed = event {
+                    window.app_handle().exit(0);
+                }
+            }
+            #[cfg(not(desktop))]
+            let _ = (window, event);
+        })
         .invoke_handler(tauri::generate_handler![
             commands::settings::load_settings,
             commands::settings::save_settings,
@@ -125,6 +136,8 @@ pub fn run() {
             commands::file_ops::pick_saf_folder,
             commands::file_ops::delete_saf_file,
             commands::api::search::search_songs,
+            commands::api::album::search_albums,
+            commands::api::album::fetch_album_songs,
             commands::api::download::fetch_download_link,
             commands::api::suggest::fetch_hot_keywords,
             commands::api::suggest::fetch_suggestions,

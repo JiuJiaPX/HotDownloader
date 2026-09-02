@@ -1,5 +1,6 @@
 <template>
-    <n-tabs :value="activeTab" @update:value="$emit('update:activeTab', $event)" type="segment" size="medium">
+    <n-tabs class="task-tabs" :value="activeTab" @update:value="$emit('update:activeTab', $event)" type="segment"
+        size="medium">
         <n-tab-pane name="all" :tab="`全部 (${counts.total})`" />
         <n-tab-pane name="waiting" :tab="`等待中 (${counts.waiting})`" />
         <n-tab-pane name="downloading" :tab="`下载中 (${counts.downloading})`" />
@@ -30,3 +31,10 @@ defineEmits<{
     (e: 'update:activeTab', value: string): void
 }>()
 </script>
+
+<style scoped>
+/* 筛选在页面完成，标签页本身无内容，避免空白内容区把下方按钮挤出可视范围 */
+.task-tabs :deep(.n-tabs-pane-wrapper) {
+    display: none;
+}
+</style>

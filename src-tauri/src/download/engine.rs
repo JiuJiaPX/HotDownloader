@@ -78,6 +78,9 @@ impl DownloadEngine {
         artist: String,
         album: String,
         cover_url: String,
+        track: u32,
+        disc: u32,
+        track_total: u32,
     ) {
         let controller = TaskController {
             cancel_token: CancellationToken::new(),
@@ -109,6 +112,9 @@ impl DownloadEngine {
                 album,
                 quality,   // 传入品质
                 cover_url, // 传入封面链接
+                track,
+                disc,
+                track_total,
             },
             final_path: controller.final_path.clone(), // 共享路径
         };

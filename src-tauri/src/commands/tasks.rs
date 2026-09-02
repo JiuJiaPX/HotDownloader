@@ -30,12 +30,29 @@ pub async fn add_download_task(
     artist: String,
     album: String,
     cover_url: String,
+    track: Option<u32>,
+    disc: Option<u32>,
+    track_total: Option<u32>,
 ) -> Result<(), String> {
     let engine = app.state::<DownloadEngine>();
     engine
         .add_task(
-            task_id, song_id, song_mid, url, save_path, quality, filename, key, file_size,
-            song_title, artist, album, cover_url,
+            task_id,
+            song_id,
+            song_mid,
+            url,
+            save_path,
+            quality,
+            filename,
+            key,
+            file_size,
+            song_title,
+            artist,
+            album,
+            cover_url,
+            track.unwrap_or(0),
+            disc.unwrap_or(0),
+            track_total.unwrap_or(0),
         )
         .await;
     Ok(())
@@ -92,6 +109,10 @@ pub async fn check_download_path(
     cover_url: String,
     quality_filename: String,
     quality: String,
+    use_music_library: Option<bool>,
+    track: Option<u32>,
+    disc: Option<u32>,
+    track_total: Option<u32>,
 ) -> Result<String, String> {
     // 构建 SongInfo 对象，quality 必须传入，否则命名模板中 {quality} 会出错
     let song_info = crate::download::task::SongInfo {
@@ -100,16 +121,30 @@ pub async fn check_download_path(
         album,
         quality,
         cover_url,
+        track: track.unwrap_or(0),
+        disc: disc.unwrap_or(0),
+        track_total: track_total.unwrap_or(0),
     };
     // 先获取下载设置，再调用路径解析函数，避免函数内部再次读取设置
-    let (dir_setting, template_setting, saf_uri_setting, _, _) =
+    let (dir_setting, template_setting, saf_uri_setting, _, _, download_to_album_folder) =
         crate::download::task_path::get_download_settings(&app).await;
+    let (dir_setting, saf_uri_setting, download_to_album_folder) =
+        if use_music_library.unwrap_or(false) {
+            (
+                crate::download::task_path::music_library_base_dir(&app),
+                None,
+                true,
+            )
+        } else {
+            (dir_setting, saf_uri_setting, download_to_album_folder)
+        };
     let (is_saf, download_dir, saf_folder_uri) = crate::download::task_path::resolve_download_path(
         &dir_setting,
         &template_setting,
         saf_uri_setting.as_deref(),
         &song_info,
         &quality_filename,
+        download_to_album_folder,
     );
 
     // 检查文件是否存在
@@ -144,8 +179,20 @@ pub async fn check_download_path(
             } else {
                 format!("{} ({}).{}", stem, counter, ext)
             };
+            // SAF 相对路径可能包含专辑子目录，重命名时需保留父路径
             let new_path = if is_saf {
-                new_name.clone()
+                match path.parent() {
+                    Some(parent)
+                        if !parent.as_os_str().is_empty()
+                            && parent != std::path::Path::new(".") =>
+                    {
+                        parent
+                            .join(&new_name)
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    }
+                    _ => new_name.clone(),
+                }
             } else {
                 path.parent()
                     .unwrap_or_else(|| std::path::Path::new("."))
@@ -158,7 +205,7 @@ pub async fn check_download_path(
                 if let Some(parent_uri_str) = saf_folder_uri.as_ref() {
                     match FsUri::from_json_str(parent_uri_str) {
                         Ok(parent_uri) => {
-                            let file_path = std::path::Path::new(&new_name);
+                            let file_path = std::path::Path::new(&new_path);
                             let api = app.android_fs();
                             api.resolve_file_uri(&parent_uri, file_path).is_ok()
                         }
