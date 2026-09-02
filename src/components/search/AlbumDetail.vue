@@ -24,7 +24,7 @@
                     </div>
                 </div>
                 <n-button type="primary" class="album-download-btn" :disabled="songs.length === 0"
-                    title="保存到本机音乐库 / HotDownloader / 专辑名" @click="onDownloadAlbum">
+                    title="桌面保存到本机音乐库；安卓保存到已选 SAF 目录下的专辑文件夹" @click="onDownloadAlbum">
                     下载整张专辑
                 </n-button>
             </div>

@@ -1,6 +1,7 @@
 import { h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useDialog, useNotification, NButton } from 'naive-ui'
+import { platform } from '@tauri-apps/plugin-os'
 import type { Quality, SongInfo, QualityItem } from '../types'
 import { getDowngradeCandidates } from '../types'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -120,13 +121,13 @@ export function useDownloadActions() {
     }
 
     type DownloadOptions = {
-        /** 保存到本机音乐库 Music/<软件名>/专辑名 */
+        /** 桌面保存到本机音乐库；Android 保存到已选 SAF 下的专辑子目录 */
         useMusicLibrary?: boolean
     }
 
     /**
      * 处理重复文件策略，返回 savePath 或 null（取消）。
-     * 整张专辑下载必须回传具体路径，否则后端会落到普通下载目录。
+     * 整张专辑下载必须回传具体路径：桌面为音乐库绝对路径，Android SAF 为专辑子目录相对路径。
      */
     async function handleDuplicate(
         song: SongInfo,
@@ -265,6 +266,22 @@ export function useDownloadActions() {
 
     async function batchDownload(songs: SongInfo[], options?: DownloadOptions): Promise<void> {
         try {
+            let isAndroid = false
+            try {
+                isAndroid = (await platform()) === 'android'
+            } catch {
+                isAndroid = false
+            }
+
+            if (options?.useMusicLibrary && isAndroid && !settingsStore.settings.safFolderUri) {
+                notification.warning({
+                    title: '无法下载整张专辑',
+                    description: '请先在设置中选择 SAF 文件夹',
+                    duration: 4000,
+                })
+                return
+            }
+
             let quality: Quality
             if (settingsStore.settings.defaultQuality === 'ask') {
                 // 取所有歌曲品质的并集作为选项
@@ -372,7 +389,9 @@ export function useDownloadActions() {
                 const albumName = songs[0]?.album?.trim() || '未知专辑'
                 notification.success({
                     title: '整张专辑下载',
-                    description: `将保存到本机音乐库 / HotDownloader / ${albumName}`,
+                    description: isAndroid
+                        ? `将保存到已选下载目录下的「${albumName}」文件夹`
+                        : `将保存到本机音乐库 / HotDownloader / ${albumName}`,
                     duration: 4000,
                 })
             }

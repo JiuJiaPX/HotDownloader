@@ -79,8 +79,49 @@ pub(crate) async fn get_download_settings(
     )
 }
 
-/// 本机音乐库下的软件目录：`Music/<productName>`。
-/// 整张专辑下载会再拼上专辑名子文件夹。
+/// 整张专辑下载的目录覆盖。
+/// - 桌面：本机音乐库 `Music/<productName>`，并强制专辑子文件夹
+/// - Android：沿用用户已选的 SAF / 下载目录，只强制专辑子文件夹（不写公共 Music/）
+pub(crate) fn apply_album_library_override(
+    app: &AppHandle,
+    use_music_library: bool,
+    dir_setting: String,
+    saf_uri_setting: Option<String>,
+    download_to_album_folder: bool,
+) -> (String, Option<String>, bool) {
+    if !use_music_library {
+        return (dir_setting, saf_uri_setting, download_to_album_folder);
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        (dir_setting, saf_uri_setting, true)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        (music_library_base_dir(app), None, true)
+    }
+}
+
+/// 前端钉死的保存路径。Android 在 SAF 模式下传入的是相对路径（可含专辑子目录）。
+pub(crate) fn resolve_pinned_save_path(
+    save_path: &str,
+    dir_setting: &str,
+    saf_uri_setting: Option<&str>,
+) -> (bool, String, Option<String>) {
+    if cfg!(target_os = "android") && dir_setting == "saf://" && saf_uri_setting.is_some() {
+        (
+            true,
+            save_path.replace('\\', "/"),
+            saf_uri_setting.map(|s| s.to_string()),
+        )
+    } else {
+        (false, save_path.to_string(), None)
+    }
+}
+
+/// 本机音乐库下的软件目录：`Music/<productName>`（仅桌面端整张专辑下载使用）。
+#[cfg(not(target_os = "android"))]
 pub(crate) fn music_library_base_dir(app: &AppHandle) -> String {
     let product = app
         .config()
@@ -89,22 +130,9 @@ pub(crate) fn music_library_base_dir(app: &AppHandle) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or("HotDownloader");
 
-    let music_dir = {
-        #[cfg(target_os = "android")]
-        {
-            if let Ok(ext) = std::env::var("EXTERNAL_STORAGE") {
-                Path::new(&ext).join("Music")
-            } else {
-                Path::new("/storage/emulated/0/Music").to_path_buf()
-            }
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            dirs::audio_dir()
-                .or_else(|| dirs::home_dir().map(|h| h.join("Music")))
-                .unwrap_or_else(|| Path::new(".").to_path_buf())
-        }
-    };
+    let music_dir = dirs::audio_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Music")))
+        .unwrap_or_else(|| Path::new(".").to_path_buf());
 
     music_dir.join(product).to_string_lossy().to_string()
 }

@@ -129,15 +129,13 @@ pub async fn check_download_path(
     let (dir_setting, template_setting, saf_uri_setting, _, _, download_to_album_folder) =
         crate::download::task_path::get_download_settings(&app).await;
     let (dir_setting, saf_uri_setting, download_to_album_folder) =
-        if use_music_library.unwrap_or(false) {
-            (
-                crate::download::task_path::music_library_base_dir(&app),
-                None,
-                true,
-            )
-        } else {
-            (dir_setting, saf_uri_setting, download_to_album_folder)
-        };
+        crate::download::task_path::apply_album_library_override(
+            &app,
+            use_music_library.unwrap_or(false),
+            dir_setting,
+            saf_uri_setting,
+            download_to_album_folder,
+        );
     let (is_saf, download_dir, saf_folder_uri) = crate::download::task_path::resolve_download_path(
         &dir_setting,
         &template_setting,
@@ -186,10 +184,7 @@ pub async fn check_download_path(
                         if !parent.as_os_str().is_empty()
                             && parent != std::path::Path::new(".") =>
                     {
-                        parent
-                            .join(&new_name)
-                            .to_string_lossy()
-                            .replace('\\', "/")
+                        parent.join(&new_name).to_string_lossy().replace('\\', "/")
                     }
                     _ => new_name.clone(),
                 }

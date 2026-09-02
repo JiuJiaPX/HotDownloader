@@ -12,6 +12,8 @@
     "dialog:default",
     "store:default",
     "log:default",
+    "os:default",
+    "notification:default",
     "android-fs:default",
     "opener:default"
   ]

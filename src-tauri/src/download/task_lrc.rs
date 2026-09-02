@@ -51,14 +51,10 @@ pub(crate) async fn write_lrc_file(
 
     // SAF 相对路径可能包含专辑子目录，歌词文件需与歌曲放在同一文件夹
     let lrc_file_name = match song_name.parent() {
-        Some(parent)
-            if !parent.as_os_str().is_empty() && parent != Path::new(".") =>
-        {
-            parent
-                .join(format!("{}.lrc", stem))
-                .to_string_lossy()
-                .replace('\\', "/")
-        }
+        Some(parent) if !parent.as_os_str().is_empty() && parent != Path::new(".") => parent
+            .join(format!("{}.lrc", stem))
+            .to_string_lossy()
+            .replace('\\', "/"),
         _ => format!("{}.lrc", stem),
     };
     let api = app_handle.android_fs();

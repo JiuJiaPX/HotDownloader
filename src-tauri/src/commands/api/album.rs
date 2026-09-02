@@ -19,11 +19,7 @@ const LEGACY_SEARCH_URL: &str = "https://c.y.qq.com/soso/fcgi-bin/client_search_
 
 fn first_str(item: &Value, keys: &[&str]) -> String {
     for key in keys {
-        if let Some(s) = item[*key]
-            .as_str()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
+        if let Some(s) = item[*key].as_str().map(str::trim).filter(|s| !s.is_empty()) {
             return s.to_string();
         }
     }
@@ -303,7 +299,12 @@ pub async fn search_albums(keyword: String, page: u32, limit: u32) -> Result<Str
     .map_err(|e| format!("序列化结果失败: {}", e))
 }
 
-fn fallback_album_from_songs(album_mid: &str, album_id: u64, songs: &[Value], raw: Option<&Value>) -> Value {
+fn fallback_album_from_songs(
+    album_mid: &str,
+    album_id: u64,
+    songs: &[Value],
+    raw: Option<&Value>,
+) -> Value {
     let first = songs.first();
     let name = first
         .and_then(|s| s["album"].as_str())
@@ -341,12 +342,7 @@ fn fallback_album_from_songs(album_mid: &str, album_id: u64, songs: &[Value], ra
             }
         });
     let publish_time = raw
-        .map(|v| {
-            first_str(
-                v,
-                &["time_public", "pub_time", "publicTime", "publishDate"],
-            )
-        })
+        .map(|v| first_str(v, &["time_public", "pub_time", "publicTime", "publishDate"]))
         .filter(|s| !s.is_empty())
         .or_else(|| {
             raw.and_then(|v| {
@@ -416,10 +412,7 @@ pub async fn fetch_album_songs(album_mid: String) -> Result<String, String> {
 
     let songs_node = &data["albumSonglist"];
     if songs_node["code"] != 0 {
-        return Err(format!(
-            "获取专辑歌曲失败: code={}",
-            songs_node["code"]
-        ));
+        return Err(format!("获取专辑歌曲失败: code={}", songs_node["code"]));
     }
 
     let song_list = songs_node["data"]["songList"]

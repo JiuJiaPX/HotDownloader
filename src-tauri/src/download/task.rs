@@ -20,7 +20,7 @@ use super::task_fetch::{fetch_download_link_with_retry, is_retryable_network_err
 use super::task_file::open_download_file;
 use super::task_lrc::write_lrc_file;
 use super::task_metadata::write_metadata;
-use super::task_path::{get_download_settings, resolve_download_path};
+use super::task_path::{get_download_settings, resolve_download_path, resolve_pinned_save_path};
 use crate::commands::api::lyrics;
 use crate::utils::crypto;
 
@@ -42,8 +42,8 @@ pub struct SongInfo {
     pub album: String,
     pub quality: String,
     pub cover_url: String, // 封面 URL，用于写入音频标签
-    pub track: u32,         // 专辑内曲序，0 表示未知
-    pub disc: u32,          // 碟号，0 表示未知
+    pub track: u32,        // 专辑内曲序，0 表示未知
+    pub disc: u32,         // 碟号，0 表示未知
     pub track_total: u32,  // 专辑总曲目数，0 表示未知
 }
 
@@ -99,8 +99,9 @@ pub async fn download_task(
     ) = get_download_settings(&app_handle).await;
 
     // 1. 构建最终保存路径（只需一次）
+    // 前端钉死的路径在 Android SAF 下是相对路径，不能当成普通文件系统路径
     let (is_saf, download_dir, saf_folder_uri) = if !ctx.save_path.is_empty() {
-        (false, ctx.save_path.clone(), None)
+        resolve_pinned_save_path(&ctx.save_path, &dir_setting, saf_uri_setting.as_deref())
     } else {
         resolve_download_path(
             &dir_setting,
