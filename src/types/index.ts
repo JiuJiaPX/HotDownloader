@@ -137,6 +137,29 @@ export interface AlbumSongsResponse {
     songs: SongInfo[]
 }
 
+// 歌手基本信息
+export interface SingerInfo {
+    id: number
+    mid: string
+    name: string
+    coverUrl: string
+    albumCount: number
+    songCount: number
+}
+
+// 歌手搜索结果
+export interface SingerSearchResponse {
+    singers: SingerInfo[]
+    has_more: boolean
+}
+
+// 歌手专辑列表
+export interface SingerAlbumsResponse {
+    albums: AlbumInfo[]
+    total: number
+    has_more: boolean
+}
+
 // 搜索建议条目（对应后端 fetch_suggestions 返回的每个 item）
 export interface SearchSuggestionItem {
     id?: string

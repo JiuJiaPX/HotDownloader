@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { SongInfo, SearchResponse, SearchSuggestionData, PlaylistSongsResponse, AlbumSearchResponse, AlbumSongsResponse, UpdateInfo, LyricResponse } from '../types'
+import type { SongInfo, SearchResponse, SearchSuggestionData, PlaylistSongsResponse, AlbumSearchResponse, AlbumSongsResponse, SingerSearchResponse, SingerAlbumsResponse, UpdateInfo, LyricResponse } from '../types'
 
 export async function searchSongs(
     keyword: string,
@@ -26,6 +26,24 @@ export async function searchAlbums(
 export async function fetchAlbumSongs(albumMid: string): Promise<AlbumSongsResponse> {
     const json = await invoke<string>('fetch_album_songs', { albumMid })
     return JSON.parse(json) as AlbumSongsResponse
+}
+
+export async function searchSingers(
+    keyword: string,
+    page: number = 1,
+    limit: number = 20
+): Promise<SingerSearchResponse> {
+    const json = await invoke<string>('search_singers', { keyword, page, limit })
+    return JSON.parse(json) as SingerSearchResponse
+}
+
+export async function fetchSingerAlbums(
+    singerMid: string,
+    begin: number = 0,
+    num: number = 20
+): Promise<SingerAlbumsResponse> {
+    const json = await invoke<string>('fetch_singer_albums', { singerMid, begin, num })
+    return JSON.parse(json) as SingerAlbumsResponse
 }
 
 export async function fetchDownloadLink(

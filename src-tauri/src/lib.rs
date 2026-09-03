@@ -138,6 +138,8 @@ pub fn run() {
             commands::api::search::search_songs,
             commands::api::album::search_albums,
             commands::api::album::fetch_album_songs,
+            commands::api::singer::search_singers,
+            commands::api::singer::fetch_singer_albums,
             commands::api::download::fetch_download_link,
             commands::api::suggest::fetch_hot_keywords,
             commands::api::suggest::fetch_suggestions,

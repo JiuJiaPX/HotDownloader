@@ -6,5 +6,6 @@ pub(crate) mod lyrics;
 pub(crate) mod parser;
 pub(crate) mod playlist;
 pub(crate) mod search;
+pub(crate) mod singer;
 pub(crate) mod suggest;
 pub(crate) mod update;
