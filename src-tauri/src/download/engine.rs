@@ -264,6 +264,9 @@ impl DownloadEngine {
                                 // 任务已被取消，通知 done 并返回 None
                                 ctrl.done.notify_one();
                                 None
+                            } else if ctrl.started.load(Ordering::SeqCst) {
+                                // 已在运行（队列中的重复条目），跳过避免同一任务下两次
+                                None
                             } else {
                                 // 设置 started 并标记可以启动
                                 ctrl.started.store(true, Ordering::SeqCst);

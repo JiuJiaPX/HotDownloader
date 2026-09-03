@@ -471,69 +471,79 @@ pub async fn download_task(
         // 文件下载完成，发送事件，前端进入 processing 状态
         progress::emit_file_complete(&app_handle, &ctx.task_id);
 
-        // 获取歌词（仅当需要写入 metadata 或单独下载 lrc 时才请求）
-        let lyric_resp = if write_metadata_enabled || download_lrc_enabled {
-            match lyrics::get_lyric_by_id(ctx.song_id).await {
-                Ok(resp) => Some(resp),
-                Err(e) => {
-                    log::warn!("获取歌词失败: {}", e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // 写入音频文件 metadata（歌词/封面/曲序）。
-        // 曲序即使未开启「写入标签」也要写入，否则资源管理器「#」列为空。
-        if write_metadata_enabled || ctx.song_info.track > 0 {
-            write_metadata(
-                &app_handle,
-                &ctx.task_id,
-                &download_dir,
-                is_saf,
-                saf_file_uri.clone(),
-                if write_metadata_enabled {
-                    &ctx.song_info.cover_url
-                } else {
-                    ""
-                },
-                if write_metadata_enabled {
-                    lyric_resp.clone()
-                } else {
-                    None
-                },
-                ctx.song_info.track,
-                ctx.song_info.disc,
-                ctx.song_info.track_total,
-            )
-            .await;
-        }
-
-        // 单独下载 LRC 歌词文件（仅当有普通歌词且开关开启）
-        if download_lrc_enabled {
-            if let Some(lrc) = lyric_resp
-                .as_ref()
-                .and_then(|r| r.lrc.as_ref())
-                .filter(|s| !s.trim().is_empty())
-            {
-                let lrc_path = write_lrc_file(
-                    &app_handle,
-                    lrc,
-                    &download_dir,
-                    is_saf,
-                    saf_folder_uri.clone(),
-                )
-                .await;
-                if let Some(path) = lrc_path {
-                    *controller.lrc_final_path.lock().await = Some(path);
+        let post_process = async {
+            // 获取歌词（仅当需要写入 metadata 或单独下载 lrc 时才请求）
+            let lyric_resp = if write_metadata_enabled || download_lrc_enabled {
+                match lyrics::get_lyric_by_id(ctx.song_id).await {
+                    Ok(resp) => Some(resp),
+                    Err(e) => {
+                        log::warn!("获取歌词失败: {}", e);
+                        None
+                    }
                 }
             } else {
-                log::info!("无普通歌词，跳过 LRC 文件创建");
+                None
+            };
+
+            // 写入音频文件 metadata（歌词/封面/曲序）。
+            // 曲序即使未开启「写入标签」也要写入，否则资源管理器「#」列为空。
+            if write_metadata_enabled || ctx.song_info.track > 0 {
+                write_metadata(
+                    &app_handle,
+                    &ctx.task_id,
+                    &download_dir,
+                    is_saf,
+                    saf_file_uri.clone(),
+                    if write_metadata_enabled {
+                        &ctx.song_info.cover_url
+                    } else {
+                        ""
+                    },
+                    if write_metadata_enabled {
+                        lyric_resp.clone()
+                    } else {
+                        None
+                    },
+                    ctx.song_info.track,
+                    ctx.song_info.disc,
+                    ctx.song_info.track_total,
+                )
+                .await;
             }
+
+            // 单独下载 LRC 歌词文件（仅当有普通歌词且开关开启）
+            if download_lrc_enabled {
+                if let Some(lrc) = lyric_resp
+                    .as_ref()
+                    .and_then(|r| r.lrc.as_ref())
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    let lrc_path = write_lrc_file(
+                        &app_handle,
+                        lrc,
+                        &download_dir,
+                        is_saf,
+                        saf_folder_uri.clone(),
+                    )
+                    .await;
+                    if let Some(path) = lrc_path {
+                        *controller.lrc_final_path.lock().await = Some(path);
+                    }
+                } else {
+                    log::info!("无普通歌词，跳过 LRC 文件创建");
+                }
+            }
+        };
+
+        // 后处理失败或超时也不能卡住「处理中」，文件本身已经下完。
+        if tokio::time::timeout(Duration::from_secs(60), post_process)
+            .await
+            .is_err()
+        {
+            log::warn!("任务 {} 后处理超时，仍标记为下载完成", ctx.task_id);
+            progress::emit_metadata_error(&app_handle, &ctx.task_id, "后处理超时，已跳过");
         }
 
-        // 全部处理完成，发送下载完成事件
         let final_display_path = if is_saf {
             saf_file_uri.clone().unwrap_or_else(|| download_dir.clone())
         } else {

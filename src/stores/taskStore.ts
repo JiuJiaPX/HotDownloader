@@ -35,6 +35,10 @@ export const useTaskStore = defineStore('tasks', () => {
                         task.status = 'error'
                         task.errorMsg = '应用关闭导致中断'
                         task.downloaded = 0
+                    } else if (task.status === 'processing') {
+                        // 文件已下完，只是写标签阶段被中断；按已完成恢复，避免永远卡在处理中
+                        task.status = 'completed'
+                        task.downloaded = task.fileSize
                     } else if (task.status === 'error') {
                         task.downloaded = 0
                     }
@@ -69,6 +73,20 @@ export const useTaskStore = defineStore('tasks', () => {
             albumSongCount?: number
         }
     ) {
+        // 同一首歌同一音质已在队列中时不再重复添加（防止整张专辑被触发两次）
+        const activeDup = tasks.value.find(
+            (t) =>
+                t.songMid === task.songMid &&
+                t.quality === task.quality &&
+                (t.status === 'waiting' ||
+                    t.status === 'downloading' ||
+                    t.status === 'paused' ||
+                    t.status === 'processing')
+        )
+        if (activeDup) {
+            return
+        }
+
         tasks.value.push(task)
         saveTasks()
         invoke('add_download_task', {
@@ -227,6 +245,19 @@ export const useTaskStore = defineStore('tasks', () => {
     function setupListeners(): () => void {
         const unlisteners: Array<Promise<UnlistenFn>> = []
 
+        // 会话中若已有卡在处理中的任务，按已完成恢复（文件已下完）
+        let recoveredStuck = false
+        for (const task of tasks.value) {
+            if (task.status === 'processing') {
+                task.status = 'completed'
+                task.downloaded = task.fileSize
+                recoveredStuck = true
+            }
+        }
+        if (recoveredStuck) {
+            saveTasks()
+        }
+
         unlisteners.push(
             listen<DownloadProgressPayload>('download-progress', (event) => {
                 const task = tasks.value.find((t) => t.id === event.payload.task_id)
@@ -250,6 +281,15 @@ export const useTaskStore = defineStore('tasks', () => {
                 task.downloaded = task.fileSize
                 task.status = 'processing'
                 saveTasks()
+                const taskId = task.id
+                window.setTimeout(() => {
+                    const stuck = tasks.value.find((t) => t.id === taskId)
+                    if (stuck && stuck.status === 'processing') {
+                        stuck.status = 'completed'
+                        stuck.downloaded = stuck.fileSize
+                        saveTasks()
+                    }
+                }, 70000)
             })
         )
 

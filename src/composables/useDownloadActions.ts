@@ -290,6 +290,16 @@ export function useDownloadActions() {
 
     async function batchDownload(songs: SongInfo[], options?: DownloadOptions): Promise<void> {
         try {
+            // 按 mid 去重，避免同一首歌被加入两次任务
+            const seenMids = new Set<string>()
+            const uniqueSongs = songs.filter((song) => {
+                const mid = song.mid?.trim()
+                if (!mid || seenMids.has(mid)) return false
+                seenMids.add(mid)
+                return true
+            })
+            if (uniqueSongs.length === 0) return
+
             let isAndroid = false
             try {
                 isAndroid = (await platform()) === 'android'
@@ -310,7 +320,7 @@ export function useDownloadActions() {
             if (settingsStore.settings.defaultQuality === 'ask') {
                 // 取所有歌曲品质的并集作为选项
                 const unionMap = new Map<string, QualityItem>()
-                for (const song of songs) {
+                for (const song of uniqueSongs) {
                     for (const q of song.qualities) {
                         if (!unionMap.has(q.quality)) {
                             unionMap.set(q.quality, q)
@@ -320,7 +330,7 @@ export function useDownloadActions() {
                 const unionQualities = Array.from(unionMap.values())
                 if (unionQualities.length === 0) {
                     // 所有歌曲都没有可用品质，直接创建错误任务
-                    for (const song of songs) {
+                    for (const song of uniqueSongs) {
                         const taskId = generateTaskId()
                         taskStore.addTask({
                             id: taskId,
@@ -354,7 +364,7 @@ export function useDownloadActions() {
             }
 
             let errorCount = 0
-            for (const song of songs) {
+            for (const song of uniqueSongs) {
                 const resolved = resolveQualityForSong(song, quality)
                 if (!resolved) {
                     const taskId = generateTaskId()
@@ -410,7 +420,7 @@ export function useDownloadActions() {
                 notification.warning({ title: '批量下载', description: `${errorCount} 首歌曲无可用音质，已标记为错误` })
             }
             if (options?.useMusicLibrary) {
-                const folderLabel = albumFolderLabel(songs[0])
+                const folderLabel = albumFolderLabel(uniqueSongs[0])
                 notification.success({
                     title: '整张专辑下载',
                     description: isAndroid

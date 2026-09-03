@@ -45,8 +45,8 @@
         <SingerDetail v-if="singerDetail && !albumDetail" :singer="singerDetailInfo" :albums="singerAlbums"
             :total="singerAlbumsTotal" :loading="singerDetailLoading" :loading-more="singerAlbumsLoadingMore"
             :has-more="singerAlbumsHasMore" :error-msg="singerDetailError" :downloading-mid="downloadingAlbumMid"
-            @back="closeSingerDetail" @open-album="openAlbum" @download-album="onDownloadSingerAlbum"
-            @load-more="loadMoreSingerAlbums" />
+            @back="closeSingerDetail" @open-album="openAlbumFromSinger"
+            @download-full-album="onDownloadSingerAlbum" @load-more="loadMoreSingerAlbums" />
 
         <!-- 专辑详情 -->
         <AlbumDetail v-if="albumDetail" :album="albumDetailInfo" :songs="albumSongs" :loading="albumDetailLoading"
@@ -509,6 +509,12 @@ async function openAlbum(album: AlbumInfo) {
     await openAlbumByMid(album.mid, album.name, album.artist, album)
 }
 
+/** 歌手页打开专辑：下载进行中时忽略，避免与整张下载抢同一点击 */
+async function openAlbumFromSinger(album: AlbumInfo) {
+    if (downloadingAlbumMid.value) return
+    await openAlbum(album)
+}
+
 async function openAlbumByMid(
     mid: string,
     name: string,
@@ -630,6 +636,7 @@ async function onDownloadSingerAlbum(album: AlbumInfo) {
             })
             return
         }
+        // 只走这一条批量下载路径，避免与专辑详情页下载叠加
         await batchDownload(songs, { useMusicLibrary: true })
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e)

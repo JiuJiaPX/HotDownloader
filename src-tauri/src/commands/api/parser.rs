@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 /// - `Some(Value)`：成功解析的歌曲信息 JSON 对象，包含以下字段：
 ///   - `id`: 数字歌曲 ID（用于歌词等需要数字 ID 的接口）
 ///   - `mid`: 歌曲唯一标识（字符串 mid）
-///   - `title`: 歌曲标题（优先取 `name` 字段，若为空则取 `title` 字段）
+///   - `title`: 歌曲标题（优先完整 `title`，含伴奏等版本；否则用 `name`）
 ///   - `artist`: 歌手名（多个歌手用逗号连接）
 ///   - `album`: 专辑名
 ///   - `coverUrl`: 封面图片 URL（优先专辑封面，其次歌手头像，均无则为空字符串）
@@ -48,18 +48,9 @@ pub(crate) fn parse_song(song: &Value) -> Option<Value> {
         return None;
     }
 
-    // 标题：优先使用 `name` 字段，若为空则尝试 `title` 字段，最终回退为空字符串
-    let title = song["name"]
-        .as_str()
-        .map(|s| s.to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            song["title"]
-                .as_str()
-                .map(|s| s.to_string())
-                .filter(|s| !s.is_empty())
-        })
-        .unwrap_or_default();
+    // 标题：QQ 音乐 `name` 是原曲名，`title` 才带版本（如「伴奏」）。
+    // 若副标题本身是伴奏/纯音乐等版本信息，也一并拼进显示名和文件名。
+    let title = display_title(song);
 
     // 歌手列表，提取所有歌手的 name 并用逗号连接
     let singers: Vec<String> = song["singer"]
@@ -121,6 +112,49 @@ pub(crate) fn parse_song(song: &Value) -> Option<Value> {
         "disc": disc,
         "trackTotal": 0
     }))
+}
+
+fn first_nonempty_str(item: &Value, keys: &[&str]) -> String {
+    for key in keys {
+        if let Some(s) = item[*key].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+            return s.to_string();
+        }
+    }
+    String::new()
+}
+
+fn is_version_subtitle(subtitle: &str) -> bool {
+    let lower = subtitle.to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "伴奏",
+        "纯音乐",
+        "instrumental",
+        "off vocal",
+        "karaoke",
+        "消音",
+        "伴唱",
+    ];
+    MARKERS
+        .iter()
+        .any(|m| subtitle.contains(m) || lower.contains(m))
+}
+
+/// 生成界面与文件名使用的歌曲标题。
+/// 优先 `title`（含「伴奏」等版本），否则用 `name`；必要时再拼上版本类 subtitle。
+fn display_title(song: &Value) -> String {
+    let name = first_nonempty_str(song, &["name"]);
+    let title = first_nonempty_str(song, &["title"]);
+    let subtitle = first_nonempty_str(song, &["subtitle", "subTitle"]);
+
+    let mut display = if !title.is_empty() { title } else { name };
+    if is_version_subtitle(&subtitle)
+        && !display.contains(&subtitle)
+        && !display.contains("伴奏")
+        && !display.to_ascii_lowercase().contains("instrumental")
+    {
+        display = format!("{} ({})", display, subtitle);
+    }
+    display
 }
 
 fn positive_u32(item: &Value, keys: &[&str]) -> u32 {

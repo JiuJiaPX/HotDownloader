@@ -50,7 +50,7 @@
                         class="download-album-btn"
                         :loading="downloadingMid === album.mid"
                         :disabled="!!downloadingMid"
-                        @click="$emit('download-album', album)"
+                        @click.stop="onDownloadAlbum(album)"
                     >
                         下载整张专辑
                     </n-button>
@@ -70,7 +70,7 @@
 import { NButton, NSpin, NAlert, NEmpty } from 'naive-ui'
 import type { AlbumInfo, SingerInfo } from '../../types'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
     singer: SingerInfo | null
     albums: AlbumInfo[]
     total?: number
@@ -88,12 +88,17 @@ withDefaults(defineProps<{
     downloadingMid: '',
 })
 
-defineEmits<{
+const emit = defineEmits<{
     (e: 'back'): void
     (e: 'open-album', album: AlbumInfo): void
-    (e: 'download-album', album: AlbumInfo): void
+    (e: 'download-full-album', album: AlbumInfo): void
     (e: 'load-more'): void
 }>()
+
+function onDownloadAlbum(album: AlbumInfo) {
+    if (props.downloadingMid) return
+    emit('download-full-album', album)
+}
 </script>
 
 <style scoped>

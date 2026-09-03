@@ -1,5 +1,7 @@
 use std::io::{Read, Seek, Write};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -12,9 +14,11 @@ use super::progress;
 use crate::commands::api::client::CLIENT; // 全局 HTTP 客户端，用于下载封面
 use crate::commands::api::lyrics::LyricResponse;
 
-/// 将歌词与封面写入音频文件 metadata
-/// 普通模式直接操作文件路径；SAF 模式通过临时文件回写实现跨平台支持
-/// 错误时通过 progress::emit_metadata_error 发送提示事件，不阻断下载完成事件
+const METADATA_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 将歌词与封面写入音频文件 metadata。
+/// 普通模式直接操作文件路径；SAF 模式通过临时文件回写实现跨平台支持。
+/// 错误或超时时通过 progress::emit_metadata_error 发送提示，不阻断下载完成。
 pub(crate) async fn write_metadata(
     app_handle: &AppHandle,
     task_id: &str,
@@ -29,7 +33,6 @@ pub(crate) async fn write_metadata(
 ) {
     // 1. 从已获取的歌词响应中提取歌词内容：优先逐字歌词（elrc），其次普通歌词（lrc）
     let lyric_text = lyric.and_then(|resp| {
-        // 优先级：逐字歌词（elrc） → 普通歌词（lrc）
         if let Some(elrc) = resp.elrc.filter(|s| !s.trim().is_empty()) {
             Some(elrc)
         } else {
@@ -52,6 +55,57 @@ pub(crate) async fn write_metadata(
         return;
     }
 
+    let app = app_handle.clone();
+    let task_id_owned = task_id.to_string();
+    let file_path_owned = file_path.to_string();
+
+    // lofty 读写是阻塞的；放进 blocking 线程，避免占满异步运行时把任务卡在「处理中」。
+    let work = tokio::task::spawn_blocking(move || {
+        let panic_result = catch_unwind(AssertUnwindSafe(|| {
+            write_metadata_sync(
+                &app,
+                &task_id_owned,
+                &file_path_owned,
+                is_saf,
+                saf_file_uri,
+                lyric_text,
+                cover_bytes,
+                track,
+                disc,
+                track_total,
+            );
+        }));
+        if panic_result.is_err() {
+            log::error!("任务 {} 写入 metadata 时发生 panic，已跳过", task_id_owned);
+            progress::emit_metadata_error(&app, &task_id_owned, "写入标签异常，已跳过");
+        }
+    });
+
+    match tokio::time::timeout(METADATA_WRITE_TIMEOUT, work).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            log::warn!("任务 {} metadata 写入线程失败: {}", task_id, e);
+            progress::emit_metadata_error(app_handle, task_id, "写入标签失败，已跳过");
+        }
+        Err(_) => {
+            log::warn!("任务 {} metadata 写入超时，跳过以免卡住处理中", task_id);
+            progress::emit_metadata_error(app_handle, task_id, "写入标签超时，已跳过");
+        }
+    }
+}
+
+fn write_metadata_sync(
+    app_handle: &AppHandle,
+    task_id: &str,
+    file_path: &str,
+    is_saf: bool,
+    saf_file_uri: Option<String>,
+    lyric_text: Option<String>,
+    cover_bytes: Option<Vec<u8>>,
+    track: u32,
+    disc: u32,
+    track_total: u32,
+) {
     // 3. 准备本地临时路径：SAF 需先复制到临时文件
     let temp_path = if is_saf {
         let uri = match &saf_file_uri {
@@ -135,7 +189,6 @@ pub(crate) async fn write_metadata(
     // 确保存在主标签
     let tag_type = tagged_file.primary_tag_type();
     if tagged_file.primary_tag().is_none() {
-        // 没有主标签时创建对应类型的空标签
         let new_tag = Tag::new(tag_type);
         tagged_file.insert_tag(new_tag);
     }
@@ -166,7 +219,6 @@ pub(crate) async fn write_metadata(
             None,
             bytes,
         );
-        // 移除旧的封面图片，避免重复
         tag.remove_picture_type(PictureType::CoverFront);
         tag.push_picture(picture);
     }
@@ -214,7 +266,6 @@ pub(crate) async fn write_metadata(
                             return;
                         }
                     };
-                    // 清空原文件并从头写入，避免旧数据残留
                     if let Err(e) = dst.set_len(0) {
                         log::warn!("清空 SAF 文件失败: {}", e);
                         let _ = std::fs::remove_file(&temp_path);
