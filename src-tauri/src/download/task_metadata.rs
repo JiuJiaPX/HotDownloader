@@ -178,12 +178,10 @@ fn write_metadata_sync(
         }
     };
 
-    // 尽量保留 ID3v1 标签，仅当待写入歌词含有多字节字符（如中文）且文件存在 ID3v1 时，主动移除 ID3v1，避免 lofty 保存时因编码转换导致 panic。
-    let needs_remove_id3v1 = lyric_text
-        .as_ref()
-        .is_some_and(|text| text.chars().any(|c| c as u32 > 0xFF));
-    if needs_remove_id3v1 && tagged_file.remove(TagType::Id3v1).is_some() {
-        log::info!("歌词包含非 Latin-1 字符，已移除 ID3v1 标签");
+    // 始终移除 ID3v1。lofty 在把非 Latin-1 文本（中文歌词/曲名）写入 ID3v1 时会 panic；
+    // release 若再配合 panic=abort，整个应用会直接闪退。
+    if tagged_file.remove(TagType::Id3v1).is_some() {
+        log::info!("已移除 ID3v1 标签，避免写入时 panic");
     }
 
     // 确保存在主标签

@@ -487,6 +487,7 @@ pub async fn download_task(
 
             // 写入音频文件 metadata（歌词/封面/曲序）。
             // 曲序即使未开启「写入标签」也要写入，否则资源管理器「#」列为空。
+            // 写标签在独立线程中进行，失败只跳过，不能让进程退出。
             if write_metadata_enabled || ctx.song_info.track > 0 {
                 write_metadata(
                     &app_handle,
